@@ -41,7 +41,16 @@ func run() throws {
     let parsed = try NavigatorCommandLine.tokenize("mv 'file 1.txt' \"folder 2/file 2.txt\"").get()
     try expect(parsed == ["mv", "file 1.txt", "folder 2/file 2.txt"], "command quoting failed: \(parsed)")
 
+    let shortPrefixed = try NavigatorCommandLine.tokenize("mnavi pwd").get()
+    try expect(shortPrefixed == ["pwd"], "mnavi prefix was not stripped: \(shortPrefixed)")
+    let officialPrefixed = try NavigatorCommandLine.tokenize("morrow-navigator pwd").get()
+    try expect(officialPrefixed == ["pwd"], "morrow-navigator prefix was not stripped: \(officialPrefixed)")
+    let reservedTopLevel = try NavigatorCommandLine.tokenize("morrow pwd").get()
+    try expect(reservedTopLevel == ["morrow", "pwd"], "reserved top-level morrow namespace was consumed")
+
     let engine = NavigatorCommandEngine()
+    let reservedResult = engine.execute(arguments: ["morrow", "pwd"], baseDirectory: root, workspaceRoot: root)
+    try expect(!reservedResult.success, "Navigator unexpectedly claimed the top-level morrow command")
     let mkdir = engine.execute(arguments: ["mkdir", "notes"], baseDirectory: root, workspaceRoot: root)
     try expect(mkdir.success, "mkdir command failed: \(mkdir.output)")
     try expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("notes").path), "mkdir did not create directory")

@@ -93,7 +93,8 @@ public enum NavigatorCommandLine {
             arguments.append(current)
         }
 
-        if arguments.first?.lowercased() == "morrow" {
+        if let first = arguments.first?.lowercased(),
+           first == "morrow-navigator" || first == "mnavi" {
             arguments.removeFirst()
         }
         return .success(arguments)
@@ -123,7 +124,8 @@ public struct NavigatorCommandEngine {
         workspaceRoot: URL?
     ) -> NavigatorCommandResult {
         var arguments = originalArguments
-        if arguments.first?.lowercased() == "morrow" {
+        if let first = arguments.first?.lowercased(),
+           first == "morrow-navigator" || first == "mnavi" {
             arguments.removeFirst()
         }
         guard let rawCommand = arguments.first else {

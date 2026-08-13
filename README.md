@@ -13,7 +13,7 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 - Open/change workspace
 - Refresh, select, open, and reveal files
 - Built-in command bar (`⌘L` focuses it)
-- External `morrow` CLI using the same command parser and command engine
+- External `morrow-navigator` CLI (`mnavi` short alias) using the same command parser and command engine
 - Live GUI synchronization for CLI mutations
 - Lightweight current-directory watcher for changes made by ordinary shell tools such as `touch`, `mv`, and `rm`
 - Restore the last workspace on launch
@@ -27,20 +27,22 @@ There is one command vocabulary, not separate GUI and shell command sets.
 From a terminal:
 
 ```bash
-morrow pwd
-morrow ls
-morrow workspace ~/workspaces
-morrow cd morrow-navigator
-morrow mkdir notes
-morrow touch notes/idea.md
-morrow mv notes/idea.md notes/design.md
-morrow select notes/design.md
-morrow open notes/design.md
-morrow rm notes/design.md
-morrow ui state
+mnavi pwd
+mnavi ls
+mnavi workspace ~/workspaces
+mnavi cd morrow-navigator
+mnavi mkdir notes
+mnavi touch notes/idea.md
+mnavi mv notes/idea.md notes/design.md
+mnavi select notes/design.md
+mnavi open notes/design.md
+mnavi rm notes/design.md
+mnavi ui state
 ```
 
-Inside the app command bar, enter the same commands without the `morrow` executable prefix:
+The official executable name is `morrow-navigator`; `mnavi` is the short daily-use alias. The top-level `morrow` command is intentionally left unclaimed for a future Morrow ecosystem dispatcher.
+
+Inside the app command bar, enter the same commands without any executable prefix:
 
 ```text
 pwd
@@ -55,7 +57,7 @@ Run `help` for the complete command list.
 
 When Morrow Navigator is running, the CLI sends commands to the app over local per-user IPC. Filesystem operations therefore update the same state observed by the GUI immediately. When the app is not running, stateless filesystem commands such as `ls`, `mkdir`, `touch`, `mv`, `cp`, `rm`, `open`, and `reveal` can still run directly; commands that manipulate Navigator navigation state require the app.
 
-`morrow --json ...` returns a machine-readable `NavigatorCommandResult` for automation and agents.
+`mnavi --json ...` (or `morrow-navigator --json ...`) returns a machine-readable `NavigatorCommandResult` for automation and agents.
 
 ## Architecture
 
@@ -63,7 +65,7 @@ When Morrow Navigator is running, the CLI sends commands to the app over local p
                     MorrowNavigatorCore
              command parser + filesystem engine
                     /                 \
-             AppKit GUI              morrow CLI
+             AppKit GUI       morrow-navigator / mnavi
                  |                       |
                  +----- local IPC -------+
                  |
@@ -89,6 +91,6 @@ swift run MorrowNavigatorCoreSelfTest
 open "dist/Morrow Navigator.app"
 ```
 
-`build-app.sh` also builds `dist/morrow` and symlinks it to `~/.local/bin/morrow`.
+`build-app.sh` also builds `dist/morrow-navigator` and installs two symlinks: `~/.local/bin/morrow-navigator` and `~/.local/bin/mnavi`. It removes the old `~/.local/bin/morrow` only when that symlink points to this Navigator project, leaving the `morrow` namespace free for the wider ecosystem.
 
 The self-test executable is used instead of XCTest so the project can be built and verified with Apple's standalone Command Line Tools; full Xcode is not required.
