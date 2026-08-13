@@ -28,23 +28,24 @@ private final class InstantOutlineView: NSOutlineView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let clickedRow = row(at: point)
-        let clickedDisclosure = clickedRow >= 0 && frameOfOutlineCell(atRow: clickedRow).contains(point)
-
-        beginInstantUpdates()
-        super.mouseDown(with: event)
 
         if event.clickCount == 1,
            clickedRow >= 0,
-           !clickedDisclosure,
            let node = item(atRow: clickedRow) as? FileNode,
            node.info.isNavigableDirectory {
+            // The whole row is the interaction target. The disclosure triangle is
+            // presentation only and never receives separate click behavior.
+            selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
             if isItemExpanded(node) {
-                super.collapseItem(node)
+                collapseItem(node)
             } else {
-                super.expandItem(node)
+                expandItem(node)
             }
+            return
         }
 
+        beginInstantUpdates()
+        super.mouseDown(with: event)
         endInstantUpdates()
     }
 
