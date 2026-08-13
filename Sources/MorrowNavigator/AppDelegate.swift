@@ -10,9 +10,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         configureMainMenu()
 
+        let savedWorkspaceURL = UserDefaults.standard.string(forKey: "lastWorkspaceURL")
+            .flatMap(URL.init(string:))
         let savedPath = UserDefaults.standard.string(forKey: "lastWorkspacePath")
-        let savedURL = savedPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let initialURL = savedURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        let legacyURL = savedPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let candidate = savedWorkspaceURL ?? legacyURL
+        let initialURL = candidate.flatMap { url -> URL? in
+            if RemoteLocation(url: url) != nil { return url }
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
 
         let controller = MainWindowController(initialWorkspace: initialURL)
         windowController = controller

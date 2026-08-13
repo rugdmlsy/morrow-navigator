@@ -17,12 +17,14 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 - External `morrow-navigator` CLI (`mnavi` short alias) using the same command parser and command engine
 - Live GUI synchronization for CLI mutations
 - Lightweight current-directory watcher for changes made by ordinary shell tools such as `touch`, `mv`, and `rm`
-- Read-only remote directory browsing over the system SSH client, with hosts discovered from `~/.ssh/config`
+- Read-only remote directory browsing over the system SSH client, with Navigator-managed remote shortcuts and optional import from `~/.ssh/config`
 - Restore the last workspace on launch
 
 Hidden files remain omitted from the GUI by default; `ls -a` can inspect them from the command interface.
 
-Remote hosts appear in the sidebar under **REMOTE**. Selecting a host opens its filesystem root and uses the existing SSH alias, key, proxy, and host configuration. Remote browsing is intentionally read-only for now; local-only actions such as **Reveal in Finder** and **Use as Workspace** are disabled while browsing a remote location. The remote host must provide `python3` for structured directory metadata collection.
+Remote connections appear in the sidebar under **REMOTE**. Use **+** to add any SSH alias/host accepted by the system `ssh` client, the import button to merge literal aliases from `~/.ssh/config`, and the minus button beside a remote to remove only its Navigator shortcut. Navigator does not edit `~/.ssh/config` or store SSH credentials.
+
+Remote directory listings are cached lazily under `~/Library/Caches/MorrowNavigator/RemoteDirectories`. Revisiting a directory renders cached metadata immediately while an SSH refresh runs in the background; fresh results replace stale cache entries. OpenSSH connection multiplexing is kept alive briefly to reduce repeated handshake latency while moving through a remote tree. Remote folders can also be promoted to the main workspace root, so the left explorer uses cached remote nodes and refreshes expanded folders asynchronously. Remote browsing remains read-only for now, and local-only actions such as **Reveal in Finder** stay disabled. The remote host must provide `python3` for structured directory metadata collection.
 
 ## Command model
 

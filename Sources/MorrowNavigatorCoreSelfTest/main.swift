@@ -56,6 +56,22 @@ func run() throws {
     try expect(remoteChild.parent == RemoteLocation(host: "alpha", path: "/var"), "remote path parent failed")
     try expect(RemoteLocation(url: remoteChild.url) == remoteChild, "remote URL round-trip failed: \(remoteChild.url)")
 
+    let remoteCache = RemoteDirectoryCache(rootDirectory: root.appendingPathComponent("remote-cache", isDirectory: true))
+    let cachedItem = FileInfo(
+        url: remoteRoot.appending("etc").url,
+        name: "etc",
+        isDirectory: true,
+        isPackage: false,
+        size: nil,
+        modifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
+        isHidden: false
+    )
+    let cachedAt = Date(timeIntervalSince1970: 1_700_000_100)
+    try remoteCache.store([cachedItem], for: remoteRoot, savedAt: cachedAt)
+    let cachedDirectory = remoteCache.cachedDirectory(remoteRoot)
+    try expect(cachedDirectory?.items == [cachedItem], "remote directory cache did not round-trip items")
+    try expect(cachedDirectory?.savedAt == cachedAt, "remote directory cache did not preserve timestamp")
+
     let parsed = try NavigatorCommandLine.tokenize("mv 'file 1.txt' \"folder 2/file 2.txt\"").get()
     try expect(parsed == ["mv", "file 1.txt", "folder 2/file 2.txt"], "command quoting failed: \(parsed)")
 

@@ -228,10 +228,16 @@ print(json.dumps(items, ensure_ascii=False))
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: sshPath)
+        let controlPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ssh/morrow-navigator-%C")
+            .path
         process.arguments = [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=5",
             "-o", "NumberOfPasswordPrompts=0",
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPersist=120",
+            "-o", "ControlPath=\(controlPath)",
             host,
             remoteCommand
         ]
