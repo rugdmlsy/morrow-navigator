@@ -365,10 +365,8 @@ final class MainWindowController: NSWindowController {
         commandField.isEnabled = true
         commandField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         commandField.textColor = NSColor.white.withAlphaComponent(0.95)
-        commandField.placeholderAttributedString = NSAttributedString(
-            string: "Command · help for available commands",
-            attributes: [.foregroundColor: NSColor.white.withAlphaComponent(0.42)]
-        )
+        restoreCommandPlaceholder()
+        commandField.delegate = self
         commandField.focusRingType = .none
         commandField.isBordered = false
         commandField.drawsBackground = false
@@ -686,6 +684,13 @@ final class MainWindowController: NSWindowController {
         window?.makeFirstResponder(commandField)
     }
 
+    private func restoreCommandPlaceholder() {
+        commandField.placeholderAttributedString = NSAttributedString(
+            string: "Command · help for available commands",
+            attributes: [.foregroundColor: NSColor.white.withAlphaComponent(0.42)]
+        )
+    }
+
     func executeCommand(arguments: [String]) -> NavigatorCommandResult {
         let baseDirectory = currentDirectory ?? rootNode?.info.url ?? FileManager.default.homeDirectoryForCurrentUser
         let result = commandEngine.execute(
@@ -928,6 +933,18 @@ final class MainWindowController: NSWindowController {
         guard let item = itemForContextMenu() else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(item.url.path, forType: .string)
+    }
+}
+
+extension MainWindowController: NSTextFieldDelegate {
+    func controlTextDidBeginEditing(_ notification: Notification) {
+        guard notification.object as? NSTextField === commandField else { return }
+        commandField.placeholderAttributedString = nil
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard notification.object as? NSTextField === commandField else { return }
+        restoreCommandPlaceholder()
     }
 }
 
