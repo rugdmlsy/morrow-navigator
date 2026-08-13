@@ -286,19 +286,32 @@ final class MainWindowController: NSWindowController {
         commandOutputLabel.toolTip = "Click to view full command output"
         commandOutputLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showFullCommandOutput)))
 
+        let commandInputBackground = NSVisualEffectView()
+        commandInputBackground.translatesAutoresizingMaskIntoConstraints = false
+        commandInputBackground.material = .hudWindow
+        commandInputBackground.blendingMode = .withinWindow
+        commandInputBackground.state = .active
+        commandInputBackground.wantsLayer = true
+        commandInputBackground.layer?.cornerRadius = 6
+        commandInputBackground.layer?.masksToBounds = true
+
         let promptLabel = NSTextField(labelWithString: ">")
         promptLabel.translatesAutoresizingMaskIntoConstraints = false
-        promptLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
-        promptLabel.textColor = .secondaryLabelColor
+        promptLabel.font = .monospacedSystemFont(ofSize: 12, weight: .bold)
+        promptLabel.textColor = .labelColor
 
         commandField.translatesAutoresizingMaskIntoConstraints = false
-        commandField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        commandField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        commandField.textColor = .labelColor
         commandField.placeholderString = "Command · help for available commands"
         commandField.focusRingType = .none
         commandField.isBordered = false
         commandField.drawsBackground = false
         commandField.target = self
         commandField.action = #selector(runCommandField)
+
+        commandInputBackground.addSubview(promptLabel)
+        commandInputBackground.addSubview(commandField)
 
         let commandResultSeparator = NSBox()
         commandResultSeparator.translatesAutoresizingMaskIntoConstraints = false
@@ -321,8 +334,7 @@ final class MainWindowController: NSWindowController {
         container.addSubview(commandSeparator)
         container.addSubview(commandOutputLabel)
         container.addSubview(commandResultSeparator)
-        container.addSubview(promptLabel)
-        container.addSubview(commandField)
+        container.addSubview(commandInputBackground)
         container.addSubview(statusSeparator)
         container.addSubview(statusLabel)
 
@@ -358,16 +370,21 @@ final class MainWindowController: NSWindowController {
 
             commandResultSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             commandResultSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            commandResultSeparator.bottomAnchor.constraint(equalTo: commandField.topAnchor, constant: -5),
+            commandResultSeparator.bottomAnchor.constraint(equalTo: commandInputBackground.topAnchor, constant: -5),
 
-            promptLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            promptLabel.centerYAnchor.constraint(equalTo: commandField.centerYAnchor),
+            commandInputBackground.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            commandInputBackground.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            commandInputBackground.heightAnchor.constraint(equalToConstant: 30),
+            commandInputBackground.bottomAnchor.constraint(equalTo: statusSeparator.topAnchor, constant: -5),
+
+            promptLabel.leadingAnchor.constraint(equalTo: commandInputBackground.leadingAnchor, constant: 9),
             promptLabel.widthAnchor.constraint(equalToConstant: 10),
+            promptLabel.firstBaselineAnchor.constraint(equalTo: commandField.firstBaselineAnchor),
 
             commandField.leadingAnchor.constraint(equalTo: promptLabel.trailingAnchor, constant: 4),
-            commandField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            commandField.trailingAnchor.constraint(equalTo: commandInputBackground.trailingAnchor, constant: -9),
             commandField.heightAnchor.constraint(equalToConstant: 22),
-            commandField.bottomAnchor.constraint(equalTo: statusSeparator.topAnchor, constant: -5),
+            commandField.centerYAnchor.constraint(equalTo: commandInputBackground.centerYAnchor),
 
             statusSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             statusSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
