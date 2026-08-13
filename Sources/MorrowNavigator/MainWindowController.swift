@@ -1,6 +1,50 @@
 import AppKit
 import MorrowNavigatorCore
 
+private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
+    private func centeredRect(for bounds: NSRect) -> NSRect {
+        var rect = super.drawingRect(forBounds: bounds)
+        let height = cellSize(forBounds: bounds).height
+        if rect.height > height {
+            rect.origin.y += (rect.height - height) / 2
+            rect.size.height = height
+        }
+        return rect
+    }
+
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        centeredRect(for: rect)
+    }
+
+    override func edit(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor textObj: NSText,
+        delegate: Any?,
+        event: NSEvent?
+    ) {
+        super.edit(withFrame: centeredRect(for: rect), in: controlView, editor: textObj, delegate: delegate, event: event)
+    }
+
+    override func select(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor textObj: NSText,
+        delegate: Any?,
+        start selStart: Int,
+        length selLength: Int
+    ) {
+        super.select(
+            withFrame: centeredRect(for: rect),
+            in: controlView,
+            editor: textObj,
+            delegate: delegate,
+            start: selStart,
+            length: selLength
+        )
+    }
+}
+
 @MainActor
 private final class InstantOutlineView: NSOutlineView {
     private func beginInstantUpdates() {
@@ -302,6 +346,7 @@ final class MainWindowController: NSWindowController {
         promptLabel.textColor = NSColor.white.withAlphaComponent(0.95)
 
         commandField.translatesAutoresizingMaskIntoConstraints = false
+        commandField.cell = VerticallyCenteredTextFieldCell(textCell: "")
         commandField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         commandField.textColor = NSColor.white.withAlphaComponent(0.95)
         commandField.placeholderAttributedString = NSAttributedString(
@@ -374,7 +419,7 @@ final class MainWindowController: NSWindowController {
 
             promptLabel.leadingAnchor.constraint(equalTo: commandInputBackground.leadingAnchor, constant: 9),
             promptLabel.widthAnchor.constraint(equalToConstant: 10),
-            promptLabel.firstBaselineAnchor.constraint(equalTo: commandField.firstBaselineAnchor),
+            promptLabel.centerYAnchor.constraint(equalTo: commandInputBackground.centerYAnchor),
 
             commandField.leadingAnchor.constraint(equalTo: promptLabel.trailingAnchor, constant: 4),
             commandField.trailingAnchor.constraint(equalTo: commandInputBackground.trailingAnchor, constant: -9),
