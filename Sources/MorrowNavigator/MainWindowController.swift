@@ -705,7 +705,7 @@ final class MainWindowController: NSWindowController {
     }
 
     private func restoreCommandPlaceholder() {
-        commandPlaceholderLabel.isHidden = !commandField.stringValue.isEmpty || commandField.currentEditor() != nil
+        commandPlaceholderLabel.isHidden = !commandField.stringValue.isEmpty
     }
 
     func executeCommand(arguments: [String]) -> NavigatorCommandResult {
