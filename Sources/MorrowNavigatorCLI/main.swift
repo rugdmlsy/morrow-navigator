@@ -84,7 +84,7 @@ private func applyStandaloneEffect(_ result: NavigatorCommandResult) -> Navigato
     case .reveal(let path):
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         return result
-    case .navigate, .workspace, .select, .back, .forward, .uiFocusCommand, .uiShow, .uiState:
+    case .navigate, .workspace, .select, .back, .forward, .uiFocusCommand, .uiShow, .uiSidebarWidth, .uiState:
         return .failure("This command controls Navigator state; launch Morrow Navigator first.")
     }
 }

@@ -132,7 +132,9 @@ final class MainWindowController: NSWindowController {
     private var history: [URL] = []
     private var historyIndex = -1
     private var suppressOutlineSelection = false
+    private var isRestoringSidebarWidth = false
 
+    private let splitView = NSSplitView()
     private let outlineView = InstantOutlineView()
     private let tableView = NSTableView()
     private let workspaceLabel = NSTextField(labelWithString: "")
@@ -187,10 +189,10 @@ final class MainWindowController: NSWindowController {
     private func configureUI() {
         guard let contentView = window?.contentView else { return }
 
-        let splitView = NSSplitView()
         splitView.translatesAutoresizingMaskIntoConstraints = false
         splitView.isVertical = true
         splitView.dividerStyle = .thin
+        splitView.delegate = self
 
         let sidebar = makeSidebar()
         let browser = makeBrowser()
@@ -203,13 +205,30 @@ final class MainWindowController: NSWindowController {
             splitView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             splitView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             splitView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            splitView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            sidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 190),
-            sidebar.widthAnchor.constraint(lessThanOrEqualToConstant: 420)
+            splitView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         ])
 
-        sidebar.setFrameSize(NSSize(width: 260, height: 720))
-        browser.setFrameSize(NSSize(width: 860, height: 720))
+        isRestoringSidebarWidth = true
+        contentView.layoutSubtreeIfNeeded()
+        let savedWidth = UserDefaults.standard.object(forKey: "sidebarWidth") as? NSNumber
+        setSidebarWidth(CGFloat(savedWidth?.doubleValue ?? 260), persist: false)
+        isRestoringSidebarWidth = false
+    }
+
+    private func setSidebarWidth(_ requestedWidth: CGFloat, persist: Bool) {
+        guard splitView.subviews.count >= 2 else { return }
+        let minimumSidebarWidth: CGFloat = 190
+        let minimumBrowserWidth: CGFloat = 360
+        let maximumSidebarWidth = max(
+            minimumSidebarWidth,
+            splitView.bounds.width - splitView.dividerThickness - minimumBrowserWidth
+        )
+        let width = min(max(requestedWidth, minimumSidebarWidth), maximumSidebarWidth)
+        splitView.setPosition(width, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        if persist {
+            UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
+        }
     }
 
     private func makeSidebar() -> NSView {
@@ -765,6 +784,9 @@ final class MainWindowController: NSWindowController {
         case .uiShow:
             window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+        case .uiSidebarWidth(let width):
+            setSidebarWidth(CGFloat(width), persist: true)
+            return .ok("sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))")
         case .uiState:
             let workspace = rootNode?.info.url.path ?? ""
             let directory = currentDirectory?.path ?? ""
@@ -778,7 +800,7 @@ final class MainWindowController: NSWindowController {
                 "items=\(tableItems.count)",
                 "selection=\(selected.joined(separator: ","))",
                 "window_width=\(Int(window?.frame.width ?? 0))",
-                "sidebar_width=\(Int(outlineView.enclosingScrollView?.frame.width ?? 0))",
+                "sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))",
                 "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))",
                 "command_focused=\(commandField.currentEditor() != nil)",
                 "command_placeholder_visible=\(!commandPlaceholderLabel.isHidden)"
@@ -976,6 +998,36 @@ extension MainWindowController: NSTextFieldDelegate {
     func controlTextDidEndEditing(_ notification: Notification) {
         guard notification.object as? NSTextField === commandField else { return }
         restoreCommandPlaceholder()
+    }
+}
+
+extension MainWindowController: NSSplitViewDelegate {
+    func splitView(
+        _ splitView: NSSplitView,
+        constrainMinCoordinate proposedMinimumPosition: CGFloat,
+        ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
+        guard dividerIndex == 0 else { return proposedMinimumPosition }
+        return max(proposedMinimumPosition, 190)
+    }
+
+    func splitView(
+        _ splitView: NSSplitView,
+        constrainMaxCoordinate proposedMaximumPosition: CGFloat,
+        ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
+        guard dividerIndex == 0 else { return proposedMaximumPosition }
+        let maximumSidebarWidth = max(190, splitView.bounds.width - splitView.dividerThickness - 360)
+        return min(proposedMaximumPosition, maximumSidebarWidth)
+    }
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard !isRestoringSidebarWidth,
+              let splitView = notification.object as? NSSplitView,
+              splitView === self.splitView,
+              let sidebar = splitView.subviews.first,
+              sidebar.frame.width > 0 else { return }
+        UserDefaults.standard.set(Double(sidebar.frame.width), forKey: "sidebarWidth")
     }
 }
 

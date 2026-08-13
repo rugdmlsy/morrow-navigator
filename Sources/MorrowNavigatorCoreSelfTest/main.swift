@@ -73,6 +73,9 @@ func run() throws {
     let cdOutside = engine.execute(arguments: ["cd", ".."], baseDirectory: root, workspaceRoot: root)
     try expect(cdOutside.success, "cd .. at workspace root should promote the parent")
     try expect(cdOutside.effect == .workspace(parent.path), "cd .. did not promote parent to workspace: \(cdOutside.effect)")
+
+    let resizeSidebar = engine.execute(arguments: ["ui", "sidebar", "333"], baseDirectory: root, workspaceRoot: root)
+    try expect(resizeSidebar.effect == .uiSidebarWidth(333), "ui sidebar did not parse width: \(resizeSidebar.effect)")
 }
 
 do {

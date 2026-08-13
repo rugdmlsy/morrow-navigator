@@ -13,6 +13,7 @@ public enum NavigatorCommandEffect: Sendable, Equatable, Codable {
     case forward
     case uiFocusCommand
     case uiShow
+    case uiSidebarWidth(Int)
     case uiState
 }
 
@@ -291,14 +292,26 @@ public struct NavigatorCommandEngine {
     }
 
     private func ui(args: [String]) -> NavigatorCommandResult {
-        guard let subcommand = args.first?.lowercased(), args.count == 1 else {
-            return usage("ui <focus|show|state>")
+        guard let subcommand = args.first?.lowercased() else {
+            return usage("ui <focus|show|sidebar|state>")
         }
         switch subcommand {
-        case "focus", "command": return .ok(effect: .uiFocusCommand)
-        case "show": return .ok(effect: .uiShow)
-        case "state": return .ok(effect: .uiState)
-        default: return usage("ui <focus|show|state>")
+        case "focus", "command":
+            guard args.count == 1 else { return usage("ui focus") }
+            return .ok(effect: .uiFocusCommand)
+        case "show":
+            guard args.count == 1 else { return usage("ui show") }
+            return .ok(effect: .uiShow)
+        case "sidebar":
+            guard args.count == 2, let width = Int(args[1]), width > 0 else {
+                return usage("ui sidebar <width>")
+            }
+            return .ok(effect: .uiSidebarWidth(width))
+        case "state":
+            guard args.count == 1 else { return usage("ui state") }
+            return .ok(effect: .uiState)
+        default:
+            return usage("ui <focus|show|sidebar|state>")
         }
     }
 
@@ -336,6 +349,7 @@ public struct NavigatorCommandEngine {
         select <path>               select in Navigator
         refresh | back | forward    navigation controls
         ui focus | ui show | ui state
+        ui sidebar <width>          resize sidebar in points
         help
         """
     }
