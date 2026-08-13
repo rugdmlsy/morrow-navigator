@@ -294,16 +294,20 @@ final class MainWindowController: NSWindowController {
         commandInputBackground.wantsLayer = true
         commandInputBackground.layer?.cornerRadius = 6
         commandInputBackground.layer?.masksToBounds = true
+        commandInputBackground.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.48).cgColor
 
         let promptLabel = NSTextField(labelWithString: ">")
         promptLabel.translatesAutoresizingMaskIntoConstraints = false
         promptLabel.font = .monospacedSystemFont(ofSize: 12, weight: .bold)
-        promptLabel.textColor = .labelColor
+        promptLabel.textColor = NSColor.white.withAlphaComponent(0.95)
 
         commandField.translatesAutoresizingMaskIntoConstraints = false
         commandField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-        commandField.textColor = .labelColor
-        commandField.placeholderString = "Command · help for available commands"
+        commandField.textColor = NSColor.white.withAlphaComponent(0.95)
+        commandField.placeholderAttributedString = NSAttributedString(
+            string: "Command · help for available commands",
+            attributes: [.foregroundColor: NSColor.white.withAlphaComponent(0.42)]
+        )
         commandField.focusRingType = .none
         commandField.isBordered = false
         commandField.drawsBackground = false
@@ -312,10 +316,6 @@ final class MainWindowController: NSWindowController {
 
         commandInputBackground.addSubview(promptLabel)
         commandInputBackground.addSubview(commandField)
-
-        let commandResultSeparator = NSBox()
-        commandResultSeparator.translatesAutoresizingMaskIntoConstraints = false
-        commandResultSeparator.boxType = .separator
 
         let statusSeparator = NSBox()
         statusSeparator.translatesAutoresizingMaskIntoConstraints = false
@@ -333,7 +333,6 @@ final class MainWindowController: NSWindowController {
         container.addSubview(tableScroll)
         container.addSubview(commandSeparator)
         container.addSubview(commandOutputLabel)
-        container.addSubview(commandResultSeparator)
         container.addSubview(commandInputBackground)
         container.addSubview(statusSeparator)
         container.addSubview(statusLabel)
@@ -366,11 +365,7 @@ final class MainWindowController: NSWindowController {
             commandOutputLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             commandOutputLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             commandOutputLabel.heightAnchor.constraint(equalToConstant: 15),
-            commandOutputLabel.bottomAnchor.constraint(equalTo: commandResultSeparator.topAnchor, constant: -4),
-
-            commandResultSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            commandResultSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            commandResultSeparator.bottomAnchor.constraint(equalTo: commandInputBackground.topAnchor, constant: -5),
+            commandOutputLabel.bottomAnchor.constraint(equalTo: commandInputBackground.topAnchor, constant: -7),
 
             commandInputBackground.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             commandInputBackground.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
