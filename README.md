@@ -17,9 +17,12 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 - External `morrow-navigator` CLI (`mnavi` short alias) using the same command parser and command engine
 - Live GUI synchronization for CLI mutations
 - Lightweight current-directory watcher for changes made by ordinary shell tools such as `touch`, `mv`, and `rm`
+- Read-only remote directory browsing over the system SSH client, with hosts discovered from `~/.ssh/config`
 - Restore the last workspace on launch
 
 Hidden files remain omitted from the GUI by default; `ls -a` can inspect them from the command interface.
+
+Remote hosts appear in the sidebar under **REMOTE**. Selecting a host opens its filesystem root and uses the existing SSH alias, key, proxy, and host configuration. Remote browsing is intentionally read-only for now; local-only actions such as **Reveal in Finder** and **Use as Workspace** are disabled while browsing a remote location. The remote host must provide `python3` for structured directory metadata collection.
 
 ## Command model
 
@@ -86,6 +89,7 @@ The GUI owns presentation state such as the active workspace, current directory,
 - AppKit (`NSOutlineView`, `NSTableView`, `NSOpenPanel`, `NSWorkspace`)
 - Foundation distributed notifications + per-user temporary request/response files for lightweight local IPC
 - Dispatch vnode source for current-directory change notification
+- macOS system `ssh` client for remote directory metadata; no bundled SSH credentials
 - Swift Package Manager
 - No Electron, WebView, Node.js, or third-party runtime dependencies
 

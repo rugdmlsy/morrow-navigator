@@ -122,6 +122,8 @@ private final class InstantOutlineView: NSOutlineView {
 @MainActor
 final class MainWindowController: NSWindowController {
     private let fileSystem = FileSystemService()
+    private let remoteFileSystem = RemoteFileSystemService()
+    private let sshConfigDiscovery = SSHConfigDiscovery()
     private let commandEngine = NavigatorCommandEngine()
     private let directoryWatcher = DirectoryWatcher()
     private let iconCache = NSCache<NSString, NSImage>()
@@ -131,6 +133,8 @@ final class MainWindowController: NSWindowController {
     private var tableItems: [FileInfo] = []
     private var history: [URL] = []
     private var historyIndex = -1
+    private var remoteHosts: [RemoteHost] = []
+    private var remoteNavigationRequestID: UUID?
     private var suppressOutlineSelection = false
     private var isRestoringSidebarWidth = false
 
@@ -144,10 +148,12 @@ final class MainWindowController: NSWindowController {
     private let commandOutputHitArea = NSView()
     private let commandField = CommandTextField()
     private let commandPlaceholderLabel = NonInteractiveLabel(labelWithString: "Command · help for available commands")
+    private let remoteHostsStack = NSStackView()
     private var lastCommandOutput = ""
     private var commandOutputPopover: NSPopover?
     private let backButton = NSButton()
     private let forwardButton = NSButton()
+    private let browserRevealButton = NSButton()
     private let workspaceParentButton = NSButton()
     private let workspaceCurrentButton = NSButton()
 
@@ -171,6 +177,7 @@ final class MainWindowController: NSWindowController {
         window.tabbingMode = .preferred
         self.init(window: window)
 
+        remoteHosts = sshConfigDiscovery.hosts()
         configureUI()
         iconCache.countLimit = 256
 
@@ -281,10 +288,27 @@ final class MainWindowController: NSWindowController {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
+        let remoteLabel = NSTextField(labelWithString: "REMOTE")
+        remoteLabel.translatesAutoresizingMaskIntoConstraints = false
+        remoteLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        remoteLabel.textColor = .secondaryLabelColor
+
+        let reloadRemotesButton = symbolButton("arrow.clockwise", action: #selector(reloadRemoteHosts))
+        reloadRemotesButton.toolTip = "Reload SSH Hosts"
+
+        remoteHostsStack.translatesAutoresizingMaskIntoConstraints = false
+        remoteHostsStack.orientation = .vertical
+        remoteHostsStack.alignment = .leading
+        remoteHostsStack.spacing = 1
+        rebuildRemoteHostButtons()
+
         container.addSubview(explorerLabel)
         container.addSubview(workspaceLabel)
         container.addSubview(buttonStack)
         container.addSubview(scrollView)
+        container.addSubview(remoteLabel)
+        container.addSubview(reloadRemotesButton)
+        container.addSubview(remoteHostsStack)
 
         NSLayoutConstraint.activate([
             explorerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -300,10 +324,50 @@ final class MainWindowController: NSWindowController {
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 6),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: remoteLabel.topAnchor, constant: -8),
+
+            remoteLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            remoteLabel.bottomAnchor.constraint(equalTo: remoteHostsStack.topAnchor, constant: -5),
+
+            reloadRemotesButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            reloadRemotesButton.centerYAnchor.constraint(equalTo: remoteLabel.centerYAnchor),
+
+            remoteHostsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            remoteHostsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            remoteHostsStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8)
         ])
 
         return container
+    }
+
+    private func rebuildRemoteHostButtons() {
+        for view in remoteHostsStack.arrangedSubviews {
+            remoteHostsStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        guard !remoteHosts.isEmpty else {
+            let label = NSTextField(labelWithString: "No SSH hosts in ~/.ssh/config")
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = .tertiaryLabelColor
+            remoteHostsStack.addArrangedSubview(label)
+            return
+        }
+
+        for host in remoteHosts {
+            let button = NSButton(title: host.alias, target: self, action: #selector(openRemoteHost(_:)))
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.identifier = NSUserInterfaceItemIdentifier(host.alias)
+            button.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "Remote Server")
+            button.imagePosition = .imageLeading
+            button.alignment = .left
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.toolTip = "Connect to \(host.alias)"
+            button.widthAnchor.constraint(equalTo: remoteHostsStack.widthAnchor).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            remoteHostsStack.addArrangedSubview(button)
+        }
     }
 
     private func makeBrowser() -> NSView {
@@ -334,12 +398,12 @@ final class MainWindowController: NSWindowController {
         pathControl.isEditable = false
         pathControl.font = .systemFont(ofSize: 12)
 
-        let revealButton = symbolButton("arrow.forward.square", action: #selector(revealSelectedInFinder))
-        revealButton.toolTip = "Reveal in Finder"
+        configureSymbolButton(browserRevealButton, symbol: "arrow.forward.square", action: #selector(revealSelectedInFinder))
+        browserRevealButton.toolTip = "Reveal in Finder"
         let refreshButton = symbolButton("arrow.clockwise", action: #selector(refresh))
         refreshButton.toolTip = "Refresh"
 
-        let actionStack = NSStackView(views: [revealButton, refreshButton])
+        let actionStack = NSStackView(views: [browserRevealButton, refreshButton])
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionStack.orientation = .horizontal
         actionStack.spacing = 5
@@ -586,6 +650,13 @@ final class MainWindowController: NSWindowController {
     }
 
     private func navigate(to url: URL, recordHistory: Bool, revealInSidebar: Bool = true) {
+        if let remoteLocation = RemoteLocation(url: url) {
+            navigateRemote(to: remoteLocation, recordHistory: recordHistory)
+            return
+        }
+
+        remoteNavigationRequestID = nil
+        browserRevealButton.isEnabled = true
         let standardized = url.standardizedFileURL
         guard let rootNode, fileSystem.isDescendant(standardized, of: rootNode.info.url) else { return }
 
@@ -594,18 +665,13 @@ final class MainWindowController: NSWindowController {
             currentDirectory = standardized
             watchCurrentDirectory(standardized)
             pathControl.url = standardized
+            pathControl.toolTip = standardized.path
             tableView.reloadData()
             tableView.deselectAll(nil)
             updateStatus()
 
             if recordHistory {
-                if historyIndex + 1 < history.count {
-                    history.removeSubrange((historyIndex + 1)..<history.count)
-                }
-                if history.last?.standardizedFileURL != standardized {
-                    history.append(standardized)
-                }
-                historyIndex = max(0, history.count - 1)
+                recordNavigationHistory(standardized)
             }
 
             updateNavigationButtons()
@@ -618,6 +684,55 @@ final class MainWindowController: NSWindowController {
             tableView.reloadData()
             statusLabel.stringValue = "Unable to read \(standardized.lastPathComponent): \(error.localizedDescription)"
         }
+    }
+
+    private func navigateRemote(to location: RemoteLocation, recordHistory: Bool) {
+        let requestID = UUID()
+        remoteNavigationRequestID = requestID
+        directoryWatcher.stop()
+        browserRevealButton.isEnabled = false
+        currentDirectory = location.url
+        pathControl.url = location.url
+        pathControl.toolTip = location.displayPath
+        tableItems = []
+        tableView.reloadData()
+        tableView.deselectAll(nil)
+        statusLabel.stringValue = "Connecting to \(location.host)…"
+        updateWorkspaceButtons()
+
+        let service = remoteFileSystem
+        Task { [weak self] in
+            do {
+                let items = try await Task.detached(priority: .userInitiated) {
+                    try service.children(of: location)
+                }.value
+                guard let self, self.remoteNavigationRequestID == requestID else { return }
+                self.tableItems = items
+                self.tableView.reloadData()
+                self.tableView.deselectAll(nil)
+                self.statusLabel.stringValue = "\(location.host) · \(items.count) item\(items.count == 1 ? "" : "s")"
+                if recordHistory {
+                    self.recordNavigationHistory(location.url)
+                }
+                self.updateNavigationButtons()
+            } catch {
+                guard let self, self.remoteNavigationRequestID == requestID else { return }
+                self.tableItems = []
+                self.tableView.reloadData()
+                self.statusLabel.stringValue = "Unable to read \(location.displayPath): \(error.localizedDescription)"
+                self.updateNavigationButtons()
+            }
+        }
+    }
+
+    private func recordNavigationHistory(_ url: URL) {
+        if historyIndex + 1 < history.count {
+            history.removeSubrange((historyIndex + 1)..<history.count)
+        }
+        if history.last != url {
+            history.append(url)
+        }
+        historyIndex = max(0, history.count - 1)
     }
 
     private func selectDirectoryInSidebar(_ url: URL) {
@@ -667,7 +782,9 @@ final class MainWindowController: NSWindowController {
 
         let parent = root.deletingLastPathComponent().standardizedFileURL
         workspaceParentButton.isEnabled = parent.path != root.path
-        workspaceCurrentButton.isEnabled = currentDirectory.map { $0.standardizedFileURL != root } ?? false
+        workspaceCurrentButton.isEnabled = currentDirectory.map {
+            RemoteLocation(url: $0) == nil && $0.standardizedFileURL != root
+        } ?? false
     }
 
     private func updateStatus() {
@@ -691,6 +808,18 @@ final class MainWindowController: NSWindowController {
     }
 
     private func icon(for info: FileInfo) -> NSImage {
+        if RemoteLocation(url: info.url) != nil {
+            let symbol = info.isNavigableDirectory ? "folder" : "doc"
+            let key = "__remote_\(symbol)__" as NSString
+            if let cached = iconCache.object(forKey: key) {
+                return cached
+            }
+            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage()
+            image.size = NSSize(width: 16, height: 16)
+            iconCache.setObject(image, forKey: key)
+            return image
+        }
+
         let key: NSString = info.isNavigableDirectory
             ? "__folder__"
             : "ext:\(info.fileExtension.isEmpty ? "__file__" : info.fileExtension)" as NSString
@@ -739,6 +868,17 @@ final class MainWindowController: NSWindowController {
     }
 
     func executeCommand(arguments: [String]) -> NavigatorCommandResult {
+        if let currentDirectory,
+           let remote = RemoteLocation(url: currentDirectory),
+           let command = arguments.first?.lowercased(),
+           !["help", "back", "forward", "ui"].contains(command) {
+            let result = NavigatorCommandResult.failure(
+                "Remote command execution is not available yet for \(remote.host). Directory browsing is read-only."
+            )
+            showCommandResult(result)
+            return result
+        }
+
         let baseDirectory = currentDirectory ?? rootNode?.info.url ?? FileManager.default.homeDirectoryForCurrentUser
         let result = commandEngine.execute(
             arguments: arguments,
@@ -789,10 +929,12 @@ final class MainWindowController: NSWindowController {
             return .ok("sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))")
         case .uiState:
             let workspace = rootNode?.info.url.path ?? ""
-            let directory = currentDirectory?.path ?? ""
+            let directory = currentDirectory.map {
+                RemoteLocation(url: $0)?.displayPath ?? $0.path
+            } ?? ""
             let selected = tableView.selectedRowIndexes.compactMap { index -> String? in
                 guard tableItems.indices.contains(index) else { return nil }
-                return tableItems[index].url.path
+                return RemoteLocation(url: tableItems[index].url)?.displayPath ?? tableItems[index].url.path
             }
             let output = [
                 "workspace=\(workspace)",
@@ -895,7 +1037,7 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc func useCurrentDirectoryAsWorkspace() {
-        guard let currentDirectory else { return }
+        guard let currentDirectory, RemoteLocation(url: currentDirectory) == nil else { return }
         setWorkspace(currentDirectory)
     }
 
@@ -907,7 +1049,9 @@ final class MainWindowController: NSWindowController {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = currentDirectory ?? FileManager.default.homeDirectoryForCurrentUser
+        panel.directoryURL = currentDirectory.flatMap {
+            RemoteLocation(url: $0) == nil ? $0 : nil
+        } ?? rootNode?.info.url ?? FileManager.default.homeDirectoryForCurrentUser
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             self?.setWorkspace(url)
@@ -915,6 +1059,11 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc func refresh() {
+        if let currentDirectory, RemoteLocation(url: currentDirectory) != nil {
+            navigate(to: currentDirectory, recordHistory: false, revealInSidebar: false)
+            return
+        }
+
         rootNode?.invalidateChildren(recursively: true)
         outlineView.reloadData()
         if let currentDirectory, FileManager.default.fileExists(atPath: currentDirectory.path) {
@@ -937,6 +1086,7 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc func revealSelectedInFinder() {
+        guard currentDirectory.flatMap(RemoteLocation.init(url:)) == nil else { return }
         if tableView.selectedRow >= 0, tableItems.indices.contains(tableView.selectedRow) {
             NSWorkspace.shared.activateFileViewerSelecting([tableItems[tableView.selectedRow].url])
         } else if let currentDirectory {
@@ -958,6 +1108,8 @@ final class MainWindowController: NSWindowController {
         let item = tableItems[row]
         if item.isNavigableDirectory {
             navigate(to: item.url, recordHistory: true)
+        } else if let remote = RemoteLocation(url: item.url) {
+            statusLabel.stringValue = "\(remote.displayPath) · remote file opening is not available yet"
         } else {
             NSWorkspace.shared.open(item.url)
         }
@@ -967,25 +1119,40 @@ final class MainWindowController: NSWindowController {
         guard let item = itemForContextMenu() else { return }
         if item.isNavigableDirectory {
             navigate(to: item.url, recordHistory: true)
+        } else if let remote = RemoteLocation(url: item.url) {
+            statusLabel.stringValue = "\(remote.displayPath) · remote file opening is not available yet"
         } else {
             NSWorkspace.shared.open(item.url)
         }
     }
 
     @objc private func useContextItemAsWorkspace() {
-        guard let item = itemForContextMenu(), item.isNavigableDirectory else { return }
+        guard let item = itemForContextMenu(),
+              item.isNavigableDirectory,
+              RemoteLocation(url: item.url) == nil else { return }
         setWorkspace(item.url)
     }
 
     @objc private func revealContextItem() {
-        guard let item = itemForContextMenu() else { return }
+        guard let item = itemForContextMenu(), RemoteLocation(url: item.url) == nil else { return }
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
     }
 
     @objc private func copyContextPath() {
         guard let item = itemForContextMenu() else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.url.path, forType: .string)
+        let path = RemoteLocation(url: item.url)?.displayPath ?? item.url.path
+        NSPasteboard.general.setString(path, forType: .string)
+    }
+
+    @objc private func openRemoteHost(_ sender: NSButton) {
+        guard let alias = sender.identifier?.rawValue, !alias.isEmpty else { return }
+        navigate(to: RemoteLocation(host: alias, path: "/").url, recordHistory: true, revealInSidebar: false)
+    }
+
+    @objc private func reloadRemoteHosts() {
+        remoteHosts = sshConfigDiscovery.hosts()
+        rebuildRemoteHostButtons()
     }
 }
 
@@ -1034,7 +1201,17 @@ extension MainWindowController: NSSplitViewDelegate {
 extension MainWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(useContextItemAsWorkspace) {
-            return itemForContextMenu()?.isNavigableDirectory == true
+            guard let item = itemForContextMenu() else { return false }
+            return item.isNavigableDirectory && RemoteLocation(url: item.url) == nil
+        }
+        if menuItem.action == #selector(revealContextItem) {
+            guard let item = itemForContextMenu() else { return false }
+            return RemoteLocation(url: item.url) == nil
+        }
+        if menuItem.action == #selector(openContextItem),
+           let item = itemForContextMenu(),
+           RemoteLocation(url: item.url) != nil {
+            return item.isNavigableDirectory
         }
         return true
     }

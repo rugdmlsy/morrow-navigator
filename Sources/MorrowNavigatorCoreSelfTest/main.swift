@@ -38,6 +38,24 @@ func run() throws {
     try expect(service.isDescendant(URL(fileURLWithPath: "/tmp/work/src"), of: descendantRoot), "valid descendant rejected")
     try expect(!service.isDescendant(URL(fileURLWithPath: "/tmp/work-old"), of: descendantRoot), "sibling prefix accepted as descendant")
 
+    let sshConfig = root.appendingPathComponent("ssh-config")
+    try """
+    Host beta
+        HostName beta.example.com
+    Host *.internal
+        User ignored
+    Host alpha beta
+        HostName shared.example.com
+    """.write(to: sshConfig, atomically: true, encoding: .utf8)
+    let remoteHosts = SSHConfigDiscovery().hosts(configURL: sshConfig)
+    try expect(remoteHosts.map(\.alias) == ["alpha", "beta"], "SSH host discovery failed: \(remoteHosts)")
+
+    let remoteRoot = RemoteLocation(host: "alpha", path: "/")
+    let remoteChild = remoteRoot.appending("var").appending("log")
+    try expect(remoteChild.displayPath == "alpha:/var/log", "remote path append failed: \(remoteChild.displayPath)")
+    try expect(remoteChild.parent == RemoteLocation(host: "alpha", path: "/var"), "remote path parent failed")
+    try expect(RemoteLocation(url: remoteChild.url) == remoteChild, "remote URL round-trip failed: \(remoteChild.url)")
+
     let parsed = try NavigatorCommandLine.tokenize("mv 'file 1.txt' \"folder 2/file 2.txt\"").get()
     try expect(parsed == ["mv", "file 1.txt", "folder 2/file 2.txt"], "command quoting failed: \(parsed)")
 
@@ -76,6 +94,13 @@ func run() throws {
 
     let resizeSidebar = engine.execute(arguments: ["ui", "sidebar", "333"], baseDirectory: root, workspaceRoot: root)
     try expect(resizeSidebar.effect == .uiSidebarWidth(333), "ui sidebar did not parse width: \(resizeSidebar.effect)")
+
+    if let sshHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_SSH_HOST"], !sshHost.isEmpty {
+        let remoteItems = try RemoteFileSystemService().children(of: RemoteLocation(host: sshHost, path: "/"))
+        try expect(!remoteItems.isEmpty, "remote root listing was unexpectedly empty for \(sshHost)")
+        try expect(remoteItems.allSatisfy { RemoteLocation(url: $0.url)?.host == sshHost }, "remote listing returned invalid URLs")
+        print("Remote SSH integration: PASS (\(sshHost), \(remoteItems.count) root items)")
+    }
 }
 
 do {
