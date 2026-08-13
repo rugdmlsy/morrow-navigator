@@ -52,6 +52,11 @@ private final class CommandTextField: NSTextField {
         onFocusRequest?()
         super.mouseDown(with: event)
     }
+
+    override func becomeFirstResponder() -> Bool {
+        onFocusRequest?()
+        return super.becomeFirstResponder()
+    }
 }
 
 @MainActor
@@ -144,6 +149,7 @@ final class MainWindowController: NSWindowController {
     private let statusLabel = NSTextField(labelWithString: "")
     private let commandOutputLabel = NSTextField(labelWithString: "")
     private let commandField = CommandTextField()
+    private let commandPlaceholderLabel = NSTextField(labelWithString: "Command · help for available commands")
     private var lastCommandOutput = ""
     private var commandOutputPopover: NSPopover?
     private let backButton = NSButton()
@@ -376,7 +382,6 @@ final class MainWindowController: NSWindowController {
         commandField.isEnabled = true
         commandField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         commandField.textColor = NSColor.white.withAlphaComponent(0.95)
-        restoreCommandPlaceholder()
         commandField.delegate = self
         commandField.focusRingType = .none
         commandField.isBordered = false
@@ -387,7 +392,15 @@ final class MainWindowController: NSWindowController {
             self?.hideCommandPlaceholder()
         }
 
+        commandPlaceholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        commandPlaceholderLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        commandPlaceholderLabel.textColor = NSColor.white.withAlphaComponent(0.42)
+        commandPlaceholderLabel.lineBreakMode = .byTruncatingTail
+        commandPlaceholderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        commandPlaceholderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
         commandInputBackground.addSubview(promptLabel)
+        commandInputBackground.addSubview(commandPlaceholderLabel)
         commandInputBackground.addSubview(commandField)
         commandInputBackground.inputField = commandField
         commandInputBackground.onFocusRequest = { [weak self] in
@@ -458,6 +471,10 @@ final class MainWindowController: NSWindowController {
             commandField.trailingAnchor.constraint(equalTo: commandInputBackground.trailingAnchor, constant: -9),
             commandField.heightAnchor.constraint(equalToConstant: 22),
             commandField.centerYAnchor.constraint(equalTo: commandInputBackground.centerYAnchor),
+
+            commandPlaceholderLabel.leadingAnchor.constraint(equalTo: commandField.leadingAnchor),
+            commandPlaceholderLabel.trailingAnchor.constraint(equalTo: commandField.trailingAnchor),
+            commandPlaceholderLabel.centerYAnchor.constraint(equalTo: commandInputBackground.centerYAnchor),
 
             statusSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             statusSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -703,14 +720,11 @@ final class MainWindowController: NSWindowController {
     }
 
     private func hideCommandPlaceholder() {
-        commandField.placeholderAttributedString = nil
+        commandPlaceholderLabel.isHidden = true
     }
 
     private func restoreCommandPlaceholder() {
-        commandField.placeholderAttributedString = NSAttributedString(
-            string: "Command · help for available commands",
-            attributes: [.foregroundColor: NSColor.white.withAlphaComponent(0.42)]
-        )
+        commandPlaceholderLabel.isHidden = !commandField.stringValue.isEmpty || commandField.currentEditor() != nil
     }
 
     func executeCommand(arguments: [String]) -> NavigatorCommandResult {
@@ -775,7 +789,7 @@ final class MainWindowController: NSWindowController {
                 "sidebar_width=\(Int(outlineView.enclosingScrollView?.frame.width ?? 0))",
                 "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))",
                 "command_focused=\(commandField.currentEditor() != nil)",
-                "command_placeholder_visible=\(commandField.placeholderAttributedString != nil)"
+                "command_placeholder_visible=\(!commandPlaceholderLabel.isHidden)"
             ].joined(separator: "\n")
             return .ok(output)
         }
@@ -964,7 +978,7 @@ final class MainWindowController: NSWindowController {
 extension MainWindowController: NSTextFieldDelegate {
     func controlTextDidBeginEditing(_ notification: Notification) {
         guard notification.object as? NSTextField === commandField else { return }
-        commandField.placeholderAttributedString = nil
+        hideCommandPlaceholder()
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
