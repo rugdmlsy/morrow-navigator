@@ -447,6 +447,7 @@ final class MainWindowController: NSWindowController {
 
             commandOutputHitArea.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             commandOutputHitArea.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            commandOutputHitArea.heightAnchor.constraint(equalToConstant: 26),
             commandOutputHitArea.bottomAnchor.constraint(equalTo: commandInputBackground.topAnchor),
 
             commandOutputLabel.leadingAnchor.constraint(equalTo: commandOutputHitArea.leadingAnchor, constant: 12),
