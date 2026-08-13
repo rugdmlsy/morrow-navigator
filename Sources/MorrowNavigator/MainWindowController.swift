@@ -139,6 +139,7 @@ final class MainWindowController: NSWindowController {
     private let pathControl = NSPathControl()
     private let statusLabel = NSTextField(labelWithString: "")
     private let commandOutputLabel = NSTextField(labelWithString: "")
+    private let commandOutputHitArea = NSView()
     private let commandField = CommandTextField()
     private let commandPlaceholderLabel = NonInteractiveLabel(labelWithString: "Command · help for available commands")
     private var lastCommandOutput = ""
@@ -341,6 +342,11 @@ final class MainWindowController: NSWindowController {
         commandSeparator.translatesAutoresizingMaskIntoConstraints = false
         commandSeparator.boxType = .separator
 
+        commandOutputHitArea.translatesAutoresizingMaskIntoConstraints = false
+        commandOutputHitArea.addGestureRecognizer(
+            NSClickGestureRecognizer(target: self, action: #selector(showFullCommandOutput))
+        )
+
         commandOutputLabel.translatesAutoresizingMaskIntoConstraints = false
         commandOutputLabel.font = .systemFont(ofSize: 11, weight: .medium)
         commandOutputLabel.textColor = .labelColor
@@ -349,7 +355,7 @@ final class MainWindowController: NSWindowController {
         commandOutputLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         commandOutputLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         commandOutputLabel.toolTip = "Click to view full command output"
-        commandOutputLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showFullCommandOutput)))
+        commandOutputHitArea.addSubview(commandOutputLabel)
 
         let commandInputBackground = NSVisualEffectView()
         commandInputBackground.translatesAutoresizingMaskIntoConstraints = false
@@ -409,7 +415,7 @@ final class MainWindowController: NSWindowController {
         container.addSubview(headerSeparator)
         container.addSubview(tableScroll)
         container.addSubview(commandSeparator)
-        container.addSubview(commandOutputLabel)
+        container.addSubview(commandOutputHitArea)
         container.addSubview(commandInputBackground)
         container.addSubview(statusSeparator)
         container.addSubview(statusLabel)
@@ -437,12 +443,16 @@ final class MainWindowController: NSWindowController {
 
             commandSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             commandSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            commandSeparator.bottomAnchor.constraint(equalTo: commandOutputLabel.topAnchor, constant: -4),
+            commandSeparator.bottomAnchor.constraint(equalTo: commandOutputHitArea.topAnchor),
 
-            commandOutputLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            commandOutputLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            commandOutputHitArea.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            commandOutputHitArea.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            commandOutputHitArea.bottomAnchor.constraint(equalTo: commandInputBackground.topAnchor),
+
+            commandOutputLabel.leadingAnchor.constraint(equalTo: commandOutputHitArea.leadingAnchor, constant: 12),
+            commandOutputLabel.trailingAnchor.constraint(equalTo: commandOutputHitArea.trailingAnchor, constant: -12),
             commandOutputLabel.heightAnchor.constraint(equalToConstant: 15),
-            commandOutputLabel.bottomAnchor.constraint(equalTo: commandInputBackground.topAnchor, constant: -7),
+            commandOutputLabel.centerYAnchor.constraint(equalTo: commandOutputHitArea.centerYAnchor),
 
             commandInputBackground.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             commandInputBackground.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
