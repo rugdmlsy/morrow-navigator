@@ -277,8 +277,8 @@ final class MainWindowController: NSWindowController {
         commandSeparator.boxType = .separator
 
         commandOutputLabel.translatesAutoresizingMaskIntoConstraints = false
-        commandOutputLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
-        commandOutputLabel.textColor = .secondaryLabelColor
+        commandOutputLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        commandOutputLabel.textColor = .labelColor
         commandOutputLabel.lineBreakMode = .byTruncatingTail
         commandOutputLabel.maximumNumberOfLines = 1
         commandOutputLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -300,6 +300,10 @@ final class MainWindowController: NSWindowController {
         commandField.target = self
         commandField.action = #selector(runCommandField)
 
+        let commandResultSeparator = NSBox()
+        commandResultSeparator.translatesAutoresizingMaskIntoConstraints = false
+        commandResultSeparator.boxType = .separator
+
         let statusSeparator = NSBox()
         statusSeparator.translatesAutoresizingMaskIntoConstraints = false
         statusSeparator.boxType = .separator
@@ -316,6 +320,7 @@ final class MainWindowController: NSWindowController {
         container.addSubview(tableScroll)
         container.addSubview(commandSeparator)
         container.addSubview(commandOutputLabel)
+        container.addSubview(commandResultSeparator)
         container.addSubview(promptLabel)
         container.addSubview(commandField)
         container.addSubview(statusSeparator)
@@ -348,8 +353,12 @@ final class MainWindowController: NSWindowController {
 
             commandOutputLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             commandOutputLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            commandOutputLabel.heightAnchor.constraint(equalToConstant: 14),
-            commandOutputLabel.bottomAnchor.constraint(equalTo: commandField.topAnchor, constant: -3),
+            commandOutputLabel.heightAnchor.constraint(equalToConstant: 15),
+            commandOutputLabel.bottomAnchor.constraint(equalTo: commandResultSeparator.topAnchor, constant: -4),
+
+            commandResultSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            commandResultSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            commandResultSeparator.bottomAnchor.constraint(equalTo: commandField.topAnchor, constant: -5),
 
             promptLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             promptLabel.centerYAnchor.constraint(equalTo: commandField.centerYAnchor),
@@ -671,9 +680,10 @@ final class MainWindowController: NSWindowController {
             popover.performClose(nil)
             commandOutputPopover = nil
         }
-        commandOutputLabel.stringValue = raw.replacingOccurrences(of: "\n", with: "  ·  ")
+        let summary = raw.replacingOccurrences(of: "\n", with: "  ·  ")
+        commandOutputLabel.stringValue = (result.success ? "Result · " : "Error · ") + summary
         commandOutputLabel.toolTip = "Click to view full command output"
-        commandOutputLabel.textColor = result.success ? .secondaryLabelColor : .systemRed
+        commandOutputLabel.textColor = result.success ? .labelColor : .systemRed
     }
 
     @objc private func showFullCommandOutput() {
