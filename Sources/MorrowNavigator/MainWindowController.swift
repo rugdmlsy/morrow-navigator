@@ -76,6 +76,8 @@ final class MainWindowController: NSWindowController {
     private let statusLabel = NSTextField(labelWithString: "")
     private let commandOutputLabel = NSTextField(labelWithString: "")
     private let commandField = NSTextField()
+    private var lastCommandOutput = ""
+    private var commandOutputPopover: NSPopover?
     private let backButton = NSButton()
     private let forwardButton = NSButton()
     private let workspaceParentButton = NSButton()
@@ -281,7 +283,8 @@ final class MainWindowController: NSWindowController {
         commandOutputLabel.maximumNumberOfLines = 1
         commandOutputLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         commandOutputLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        commandOutputLabel.toolTip = "Command output"
+        commandOutputLabel.toolTip = "Click to view full command output"
+        commandOutputLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showFullCommandOutput)))
 
         let promptLabel = NSTextField(labelWithString: ">")
         promptLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -663,9 +666,53 @@ final class MainWindowController: NSWindowController {
 
     private func showCommandResult(_ result: NavigatorCommandResult) {
         let raw = result.output.isEmpty ? (result.success ? "ok" : "error") : result.output
+        lastCommandOutput = raw
+        if let popover = commandOutputPopover, popover.isShown {
+            popover.performClose(nil)
+            commandOutputPopover = nil
+        }
         commandOutputLabel.stringValue = raw.replacingOccurrences(of: "\n", with: "  ·  ")
-        commandOutputLabel.toolTip = raw
+        commandOutputLabel.toolTip = "Click to view full command output"
         commandOutputLabel.textColor = result.success ? .secondaryLabelColor : .systemRed
+    }
+
+    @objc private func showFullCommandOutput() {
+        guard !lastCommandOutput.isEmpty else { return }
+
+        if let popover = commandOutputPopover, popover.isShown {
+            popover.performClose(nil)
+            commandOutputPopover = nil
+            return
+        }
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        textView.textColor = .labelColor
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.string = lastCommandOutput
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 620, height: 300))
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+
+        let controller = NSViewController()
+        controller.view = scrollView
+        controller.preferredContentSize = NSSize(width: 620, height: 300)
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+        popover.contentSize = NSSize(width: 620, height: 300)
+        popover.contentViewController = controller
+        popover.show(relativeTo: commandOutputLabel.bounds, of: commandOutputLabel, preferredEdge: .maxY)
+        commandOutputPopover = popover
     }
 
     private func selectPath(_ url: URL) {
