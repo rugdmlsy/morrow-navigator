@@ -63,8 +63,16 @@ func run() throws {
     try expect(move.success, "mv command failed: \(move.output)")
     try expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("notes/final.txt").path), "mv did not move file")
 
+    let workspaceState = engine.execute(arguments: ["ws"], baseDirectory: root, workspaceRoot: root)
+    try expect(workspaceState.success && workspaceState.output == root.path, "ws did not report workspace root")
+
+    let childWorkspace = engine.execute(arguments: ["ws", "notes"], baseDirectory: root, workspaceRoot: root)
+    try expect(childWorkspace.effect == .workspace(root.appendingPathComponent("notes").path), "ws child did not retarget workspace")
+
+    let parent = root.deletingLastPathComponent().standardizedFileURL
     let cdOutside = engine.execute(arguments: ["cd", ".."], baseDirectory: root, workspaceRoot: root)
-    try expect(!cdOutside.success, "cd unexpectedly escaped workspace")
+    try expect(cdOutside.success, "cd .. at workspace root should promote the parent")
+    try expect(cdOutside.effect == .workspace(parent.path), "cd .. did not promote parent to workspace: \(cdOutside.effect)")
 }
 
 do {

@@ -148,11 +148,17 @@ public struct NavigatorCommandEngine {
                 guard try isNavigableDirectory(url) else { return .failure("Not a directory: \(url.path)") }
                 if let workspaceRoot,
                    !FileSystemService(fileManager: fileManager).isDescendant(url, of: workspaceRoot) {
-                    return .failure("Outside workspace. Use 'workspace <directory>' to change the workspace root.")
+                    // The workspace is a movable browsing root rather than a fixed
+                    // sandbox. Navigating outside it promotes the destination to the
+                    // new workspace root automatically.
+                    return .ok(url.path, effect: .workspace(url.path))
                 }
                 return .ok(url.path, effect: .navigate(url.path))
             case "workspace", "ws":
-                guard args.count == 1 else { return usage("workspace <directory>") }
+                if args.isEmpty {
+                    return .ok(workspaceRoot?.path ?? baseDirectory.path)
+                }
+                guard args.count == 1 else { return usage("workspace [directory]") }
                 let url = resolve(args[0], relativeTo: baseDirectory)
                 guard try isNavigableDirectory(url) else { return .failure("Not a directory: \(url.path)") }
                 return .ok(url.path, effect: .workspace(url.path))
@@ -318,7 +324,8 @@ public struct NavigatorCommandEngine {
         pwd                         current Navigator directory
         ls [-a] [dir]               list files
         cd <dir>                    navigate
-        workspace|ws <dir>          change workspace
+        workspace|ws [dir]          show/change movable workspace root
+                                    ws . uses current folder; ws .. uses its parent
         mkdir [-p] <path> [...]     create directories
         touch|new <path> [...]      create/touch files
         mv|rename <src> <dst>       move or rename

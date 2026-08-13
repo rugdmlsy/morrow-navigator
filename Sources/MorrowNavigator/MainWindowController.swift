@@ -78,6 +78,8 @@ final class MainWindowController: NSWindowController {
     private let commandField = NSTextField()
     private let backButton = NSButton()
     private let forwardButton = NSButton()
+    private let workspaceParentButton = NSButton()
+    private let workspaceCurrentButton = NSButton()
 
     private lazy var dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -156,12 +158,16 @@ final class MainWindowController: NSWindowController {
         workspaceLabel.lineBreakMode = .byTruncatingMiddle
         workspaceLabel.maximumNumberOfLines = 1
 
+        configureSymbolButton(workspaceParentButton, symbol: "arrow.up", action: #selector(useParentAsWorkspace))
+        workspaceParentButton.toolTip = "Use Parent Folder as Workspace"
+        configureSymbolButton(workspaceCurrentButton, symbol: "scope", action: #selector(useCurrentDirectoryAsWorkspace))
+        workspaceCurrentButton.toolTip = "Use Current Folder as Workspace"
         let chooseButton = symbolButton("folder.badge.plus", action: #selector(chooseWorkspace))
-        chooseButton.toolTip = "Open Workspace…"
+        chooseButton.toolTip = "Open Folder as Workspace…"
         let refreshButton = symbolButton("arrow.clockwise", action: #selector(refresh))
         refreshButton.toolTip = "Refresh"
 
-        let buttonStack = NSStackView(views: [chooseButton, refreshButton])
+        let buttonStack = NSStackView(views: [workspaceParentButton, workspaceCurrentButton, chooseButton, refreshButton])
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 2
@@ -395,6 +401,7 @@ final class MainWindowController: NSWindowController {
 
         let menu = NSMenu(title: "File")
         menu.addItem(withTitle: "Open", action: #selector(openContextItem), keyEquivalent: "")
+        menu.addItem(withTitle: "Use as Workspace", action: #selector(useContextItemAsWorkspace), keyEquivalent: "")
         menu.addItem(withTitle: "Reveal in Finder", action: #selector(revealContextItem), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Copy Path", action: #selector(copyContextPath), keyEquivalent: "")
@@ -404,6 +411,11 @@ final class MainWindowController: NSWindowController {
 
     private func symbolButton(_ symbol: String, action: Selector) -> NSButton {
         let button = NSButton()
+        configureSymbolButton(button, symbol: symbol, action: action)
+        return button
+    }
+
+    private func configureSymbolButton(_ button: NSButton, symbol: String, action: Selector) {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         button.target = self
@@ -414,7 +426,6 @@ final class MainWindowController: NSWindowController {
             button.widthAnchor.constraint(equalToConstant: 24),
             button.heightAnchor.constraint(equalToConstant: 24)
         ])
-        return button
     }
 
     func setWorkspace(_ url: URL) {
@@ -433,6 +444,7 @@ final class MainWindowController: NSWindowController {
         historyIndex = -1
         outlineView.reloadData()
         navigate(to: standardized, recordHistory: true, revealInSidebar: false)
+        updateWorkspaceButtons()
     }
 
     private func navigate(to url: URL, recordHistory: Bool, revealInSidebar: Bool = true) {
@@ -459,6 +471,7 @@ final class MainWindowController: NSWindowController {
             }
 
             updateNavigationButtons()
+            updateWorkspaceButtons()
             if revealInSidebar {
                 selectDirectoryInSidebar(standardized)
             }
@@ -505,6 +518,18 @@ final class MainWindowController: NSWindowController {
     private func updateNavigationButtons() {
         backButton.isEnabled = historyIndex > 0
         forwardButton.isEnabled = historyIndex >= 0 && historyIndex < history.count - 1
+    }
+
+    private func updateWorkspaceButtons() {
+        guard let root = rootNode?.info.url.standardizedFileURL else {
+            workspaceParentButton.isEnabled = false
+            workspaceCurrentButton.isEnabled = false
+            return
+        }
+
+        let parent = root.deletingLastPathComponent().standardizedFileURL
+        workspaceParentButton.isEnabled = parent.path != root.path
+        workspaceCurrentButton.isEnabled = currentDirectory.map { $0.standardizedFileURL != root } ?? false
     }
 
     private func updateStatus() {
@@ -662,11 +687,23 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    @objc func useParentAsWorkspace() {
+        guard let root = rootNode?.info.url.standardizedFileURL else { return }
+        let parent = root.deletingLastPathComponent().standardizedFileURL
+        guard parent.path != root.path else { return }
+        setWorkspace(parent)
+    }
+
+    @objc func useCurrentDirectoryAsWorkspace() {
+        guard let currentDirectory else { return }
+        setWorkspace(currentDirectory)
+    }
+
     @objc func chooseWorkspace() {
         guard let window else { return }
         let panel = NSOpenPanel()
-        panel.title = "Open Workspace"
-        panel.prompt = "Open"
+        panel.title = "Open Folder as Workspace"
+        panel.prompt = "Use as Workspace"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
@@ -735,6 +772,11 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    @objc private func useContextItemAsWorkspace() {
+        guard let item = itemForContextMenu(), item.isNavigableDirectory else { return }
+        setWorkspace(item.url)
+    }
+
     @objc private func revealContextItem() {
         guard let item = itemForContextMenu() else { return }
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
@@ -744,6 +786,15 @@ final class MainWindowController: NSWindowController {
         guard let item = itemForContextMenu() else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(item.url.path, forType: .string)
+    }
+}
+
+extension MainWindowController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(useContextItemAsWorkspace) {
+            return itemForContextMenu()?.isNavigableDirectory == true
+        }
+        return true
     }
 }
 

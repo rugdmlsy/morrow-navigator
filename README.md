@@ -10,7 +10,8 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 - Lazy directory expansion with instant row-based toggle behavior
 - Native file list with name, kind, size, and modified time
 - Back/forward navigation
-- Open/change workspace
+- Movable workspace root: promote to the parent or shrink to the current/selected child folder at any time
+- `cd ..` at the workspace root automatically promotes the parent instead of hitting a hard boundary
 - Refresh, select, open, and reveal files
 - Built-in command bar (`⌘L` focuses it)
 - External `morrow-navigator` CLI (`mnavi` short alias) using the same command parser and command engine
@@ -31,6 +32,9 @@ mnavi pwd
 mnavi ls
 mnavi workspace ~/workspaces
 mnavi cd morrow-navigator
+mnavi ws .       # make the current folder the workspace root
+mnavi cd ..      # at the root, promote its parent automatically
+mnavi ws ..      # explicitly use the current folder's parent as root
 mnavi mkdir notes
 mnavi touch notes/idea.md
 mnavi mv notes/idea.md notes/design.md
@@ -54,6 +58,8 @@ ui state
 ```
 
 Run `help` for the complete command list.
+
+The workspace is a movable browsing root, not a fixed VS Code-style boundary. In the GUI, the sidebar's up-arrow promotes the workspace to its parent, the scope button uses the current directory as the new workspace, and a child folder's context menu provides **Use as Workspace**. The same operations are available as `ws ..`, `ws .`, and `ws <child>`.
 
 When Morrow Navigator is running, the CLI sends commands to the app over local per-user IPC. Filesystem operations therefore update the same state observed by the GUI immediately. When the app is not running, stateless filesystem commands such as `ls`, `mkdir`, `touch`, `mv`, `cp`, `rm`, `open`, and `reveal` can still run directly; commands that manipulate Navigator navigation state require the app.
 

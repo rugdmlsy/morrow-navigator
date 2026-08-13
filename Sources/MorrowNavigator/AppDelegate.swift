@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: "File")
         fileItem.submenu = fileMenu
-        let openWorkspace = NSMenuItem(title: "Open Workspace…", action: #selector(openWorkspace), keyEquivalent: "o")
+        let openWorkspace = NSMenuItem(title: "Open Folder as Workspace…", action: #selector(openWorkspace), keyEquivalent: "o")
         openWorkspace.keyEquivalentModifierMask = [.command]
         openWorkspace.target = self
         fileMenu.addItem(openWorkspace)
@@ -65,6 +65,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         forward.keyEquivalentModifierMask = [.command]
         forward.target = self
         goMenu.addItem(forward)
+        goMenu.addItem(.separator())
+        let parentWorkspace = NSMenuItem(title: "Use Parent Folder as Workspace", action: #selector(useParentAsWorkspace), keyEquivalent: "")
+        parentWorkspace.target = self
+        goMenu.addItem(parentWorkspace)
+        let currentWorkspace = NSMenuItem(title: "Use Current Folder as Workspace", action: #selector(useCurrentAsWorkspace), keyEquivalent: "")
+        currentWorkspace.target = self
+        goMenu.addItem(currentWorkspace)
 
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
@@ -94,6 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func goForward() {
         windowController?.goForward()
+    }
+
+    @objc private func useParentAsWorkspace() {
+        windowController?.useParentAsWorkspace()
+    }
+
+    @objc private func useCurrentAsWorkspace() {
+        windowController?.useCurrentDirectoryAsWorkspace()
     }
 
     @objc private func refresh() {
