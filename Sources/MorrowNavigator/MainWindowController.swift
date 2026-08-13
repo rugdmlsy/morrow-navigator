@@ -59,18 +59,9 @@ private final class CommandTextField: NSTextField {
     }
 }
 
-@MainActor
-private final class CommandInputBackgroundView: NSVisualEffectView {
-    weak var inputField: NSTextField?
-    var onFocusRequest: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        if let inputField {
-            onFocusRequest?()
-            window?.makeFirstResponder(inputField)
-            return
-        }
-        super.mouseDown(with: event)
+private final class NonInteractiveLabel: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 }
 
@@ -149,7 +140,7 @@ final class MainWindowController: NSWindowController {
     private let statusLabel = NSTextField(labelWithString: "")
     private let commandOutputLabel = NSTextField(labelWithString: "")
     private let commandField = CommandTextField()
-    private let commandPlaceholderLabel = NSTextField(labelWithString: "Command · help for available commands")
+    private let commandPlaceholderLabel = NonInteractiveLabel(labelWithString: "Command · help for available commands")
     private var lastCommandOutput = ""
     private var commandOutputPopover: NSPopover?
     private let backButton = NSButton()
@@ -360,7 +351,7 @@ final class MainWindowController: NSWindowController {
         commandOutputLabel.toolTip = "Click to view full command output"
         commandOutputLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showFullCommandOutput)))
 
-        let commandInputBackground = CommandInputBackgroundView()
+        let commandInputBackground = NSVisualEffectView()
         commandInputBackground.translatesAutoresizingMaskIntoConstraints = false
         commandInputBackground.material = .hudWindow
         commandInputBackground.blendingMode = .withinWindow
@@ -402,11 +393,6 @@ final class MainWindowController: NSWindowController {
         commandInputBackground.addSubview(promptLabel)
         commandInputBackground.addSubview(commandPlaceholderLabel)
         commandInputBackground.addSubview(commandField)
-        commandInputBackground.inputField = commandField
-        commandInputBackground.onFocusRequest = { [weak self] in
-            self?.hideCommandPlaceholder()
-        }
-        promptLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(focusCommandField)))
 
         let statusSeparator = NSBox()
         statusSeparator.translatesAutoresizingMaskIntoConstraints = false
@@ -712,11 +698,6 @@ final class MainWindowController: NSWindowController {
         case .failure(let error):
             showCommandResult(.failure(error.localizedDescription))
         }
-    }
-
-    @objc private func focusCommandField() {
-        hideCommandPlaceholder()
-        window?.makeFirstResponder(commandField)
     }
 
     private func hideCommandPlaceholder() {
