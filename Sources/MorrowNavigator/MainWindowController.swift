@@ -364,9 +364,9 @@ final class MainWindowController: NSWindowController {
             button.bezelStyle = .inline
             button.isBordered = false
             button.toolTip = "Connect to \(host.alias)"
+            remoteHostsStack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: remoteHostsStack.widthAnchor).isActive = true
             button.heightAnchor.constraint(equalToConstant: 24).isActive = true
-            remoteHostsStack.addArrangedSubview(button)
         }
     }
 
