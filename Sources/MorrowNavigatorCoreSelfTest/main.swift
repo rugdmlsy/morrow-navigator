@@ -37,6 +37,25 @@ func run() throws {
     let descendantRoot = URL(fileURLWithPath: "/tmp/work")
     try expect(service.isDescendant(URL(fileURLWithPath: "/tmp/work/src"), of: descendantRoot), "valid descendant rejected")
     try expect(!service.isDescendant(URL(fileURLWithPath: "/tmp/work-old"), of: descendantRoot), "sibling prefix accepted as descendant")
+
+    let parsed = try NavigatorCommandLine.tokenize("mv 'file 1.txt' \"folder 2/file 2.txt\"").get()
+    try expect(parsed == ["mv", "file 1.txt", "folder 2/file 2.txt"], "command quoting failed: \(parsed)")
+
+    let engine = NavigatorCommandEngine()
+    let mkdir = engine.execute(arguments: ["mkdir", "notes"], baseDirectory: root, workspaceRoot: root)
+    try expect(mkdir.success, "mkdir command failed: \(mkdir.output)")
+    try expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("notes").path), "mkdir did not create directory")
+
+    let touch = engine.execute(arguments: ["touch", "draft.txt"], baseDirectory: root, workspaceRoot: root)
+    try expect(touch.success, "touch command failed: \(touch.output)")
+    try expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("draft.txt").path), "touch did not create file")
+
+    let move = engine.execute(arguments: ["mv", "draft.txt", "notes/final.txt"], baseDirectory: root, workspaceRoot: root)
+    try expect(move.success, "mv command failed: \(move.output)")
+    try expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("notes/final.txt").path), "mv did not move file")
+
+    let cdOutside = engine.execute(arguments: ["cd", ".."], baseDirectory: root, workspaceRoot: root)
+    try expect(!cdOutside.success, "cd unexpectedly escaped workspace")
 }
 
 do {

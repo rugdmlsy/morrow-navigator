@@ -58,6 +58,8 @@ private final class InstantOutlineView: NSOutlineView {
 @MainActor
 final class MainWindowController: NSWindowController {
     private let fileSystem = FileSystemService()
+    private let commandEngine = NavigatorCommandEngine()
+    private let directoryWatcher = DirectoryWatcher()
     private let iconCache = NSCache<NSString, NSImage>()
 
     private var rootNode: FileNode?
@@ -72,6 +74,8 @@ final class MainWindowController: NSWindowController {
     private let workspaceLabel = NSTextField(labelWithString: "")
     private let pathControl = NSPathControl()
     private let statusLabel = NSTextField(labelWithString: "")
+    private let commandOutputLabel = NSTextField(labelWithString: "")
+    private let commandField = NSTextField()
     private let backButton = NSButton()
     private let forwardButton = NSButton()
 
@@ -260,6 +264,30 @@ final class MainWindowController: NSWindowController {
         tableScroll.autohidesScrollers = true
         tableScroll.borderType = .noBorder
 
+        let commandSeparator = NSBox()
+        commandSeparator.translatesAutoresizingMaskIntoConstraints = false
+        commandSeparator.boxType = .separator
+
+        commandOutputLabel.translatesAutoresizingMaskIntoConstraints = false
+        commandOutputLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        commandOutputLabel.textColor = .secondaryLabelColor
+        commandOutputLabel.lineBreakMode = .byTruncatingTail
+        commandOutputLabel.toolTip = "Command output"
+
+        let promptLabel = NSTextField(labelWithString: ">")
+        promptLabel.translatesAutoresizingMaskIntoConstraints = false
+        promptLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        promptLabel.textColor = .secondaryLabelColor
+
+        commandField.translatesAutoresizingMaskIntoConstraints = false
+        commandField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        commandField.placeholderString = "Command · help for available commands"
+        commandField.focusRingType = .none
+        commandField.isBordered = false
+        commandField.drawsBackground = false
+        commandField.target = self
+        commandField.action = #selector(runCommandField)
+
         let statusSeparator = NSBox()
         statusSeparator.translatesAutoresizingMaskIntoConstraints = false
         statusSeparator.boxType = .separator
@@ -274,6 +302,10 @@ final class MainWindowController: NSWindowController {
         container.addSubview(actionStack)
         container.addSubview(headerSeparator)
         container.addSubview(tableScroll)
+        container.addSubview(commandSeparator)
+        container.addSubview(commandOutputLabel)
+        container.addSubview(promptLabel)
+        container.addSubview(commandField)
         container.addSubview(statusSeparator)
         container.addSubview(statusLabel)
 
@@ -296,7 +328,25 @@ final class MainWindowController: NSWindowController {
             tableScroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             tableScroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             tableScroll.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
-            tableScroll.bottomAnchor.constraint(equalTo: statusSeparator.topAnchor),
+            tableScroll.bottomAnchor.constraint(equalTo: commandSeparator.topAnchor),
+
+            commandSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            commandSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            commandSeparator.bottomAnchor.constraint(equalTo: commandOutputLabel.topAnchor, constant: -4),
+
+            commandOutputLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            commandOutputLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            commandOutputLabel.heightAnchor.constraint(equalToConstant: 14),
+            commandOutputLabel.bottomAnchor.constraint(equalTo: commandField.topAnchor, constant: -3),
+
+            promptLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            promptLabel.centerYAnchor.constraint(equalTo: commandField.centerYAnchor),
+            promptLabel.widthAnchor.constraint(equalToConstant: 10),
+
+            commandField.leadingAnchor.constraint(equalTo: promptLabel.trailingAnchor, constant: 4),
+            commandField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            commandField.heightAnchor.constraint(equalToConstant: 22),
+            commandField.bottomAnchor.constraint(equalTo: statusSeparator.topAnchor, constant: -5),
 
             statusSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             statusSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -392,6 +442,7 @@ final class MainWindowController: NSWindowController {
         do {
             tableItems = try fileSystem.children(of: standardized)
             currentDirectory = standardized
+            watchCurrentDirectory(standardized)
             pathControl.url = standardized
             tableView.reloadData()
             tableView.deselectAll(nil)
@@ -499,6 +550,116 @@ final class MainWindowController: NSWindowController {
     private func sizeText(for info: FileInfo) -> String {
         guard !info.isDirectory, let size = info.size else { return "—" }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    @objc private func runCommandField() {
+        let line = commandField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return }
+
+        switch NavigatorCommandLine.tokenize(line) {
+        case .success(let arguments):
+            let result = executeCommand(arguments: arguments)
+            if result.success {
+                commandField.stringValue = ""
+            }
+        case .failure(let error):
+            showCommandResult(.failure(error.localizedDescription))
+        }
+    }
+
+    func executeCommand(arguments: [String]) -> NavigatorCommandResult {
+        let baseDirectory = currentDirectory ?? rootNode?.info.url ?? FileManager.default.homeDirectoryForCurrentUser
+        let result = commandEngine.execute(
+            arguments: arguments,
+            baseDirectory: baseDirectory,
+            workspaceRoot: rootNode?.info.url
+        )
+        guard result.success else {
+            showCommandResult(result)
+            return result
+        }
+
+        let applied = applyCommandEffect(result)
+        showCommandResult(applied)
+        return applied
+    }
+
+    private func applyCommandEffect(_ result: NavigatorCommandResult) -> NavigatorCommandResult {
+        switch result.effect {
+        case .none:
+            return result
+        case .refresh:
+            refresh()
+        case .refreshAndSelect(let path):
+            refresh()
+            selectPath(URL(fileURLWithPath: path))
+        case .navigate(let path):
+            navigate(to: URL(fileURLWithPath: path), recordHistory: true)
+        case .workspace(let path):
+            setWorkspace(URL(fileURLWithPath: path, isDirectory: true))
+        case .select(let path):
+            selectPath(URL(fileURLWithPath: path))
+        case .open(let path):
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        case .reveal(let path):
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        case .back:
+            goBack()
+        case .forward:
+            goForward()
+        case .uiFocusCommand:
+            window?.makeFirstResponder(commandField)
+        case .uiShow:
+            window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        case .uiState:
+            let workspace = rootNode?.info.url.path ?? ""
+            let directory = currentDirectory?.path ?? ""
+            let selected = tableView.selectedRowIndexes.compactMap { index -> String? in
+                guard tableItems.indices.contains(index) else { return nil }
+                return tableItems[index].url.path
+            }
+            let output = [
+                "workspace=\(workspace)",
+                "cwd=\(directory)",
+                "items=\(tableItems.count)",
+                "selection=\(selected.joined(separator: ","))"
+            ].joined(separator: "\n")
+            return .ok(output)
+        }
+        return result
+    }
+
+    private func showCommandResult(_ result: NavigatorCommandResult) {
+        let raw = result.output.isEmpty ? (result.success ? "ok" : "error") : result.output
+        commandOutputLabel.stringValue = raw.replacingOccurrences(of: "\n", with: "  ·  ")
+        commandOutputLabel.toolTip = raw
+        commandOutputLabel.textColor = result.success ? .secondaryLabelColor : .systemRed
+    }
+
+    private func selectPath(_ url: URL) {
+        let standardized = url.standardizedFileURL
+        guard let root = rootNode?.info.url,
+              fileSystem.isDescendant(standardized, of: root) else { return }
+
+        if standardized == root.standardizedFileURL {
+            navigate(to: root, recordHistory: true)
+            return
+        }
+
+        let parent = standardized.deletingLastPathComponent()
+        navigate(to: parent, recordHistory: true)
+        if let index = tableItems.firstIndex(where: { $0.url.standardizedFileURL == standardized }) {
+            tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+            tableView.scrollRowToVisible(index)
+            updateStatus()
+        }
+    }
+
+    private func watchCurrentDirectory(_ url: URL) {
+        directoryWatcher.watch(url) { [weak self] in
+            self?.refresh()
+        }
     }
 
     @objc func chooseWorkspace() {

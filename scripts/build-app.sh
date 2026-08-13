@@ -7,12 +7,15 @@ cd "$ROOT"
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP="$ROOT/dist/Morrow Navigator.app"
+CLI="$ROOT/dist/morrow"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 
 rm -rf "$APP"
 mkdir -p "$MACOS"
 cp "$BIN_DIR/MorrowNavigator" "$MACOS/MorrowNavigator"
+cp "$BIN_DIR/morrow" "$CLI"
+chmod +x "$CLI"
 
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,4 +52,9 @@ if command -v codesign >/dev/null 2>&1; then
     codesign --force --sign - "$APP" >/dev/null
 fi
 
+mkdir -p "$HOME/.local/bin"
+ln -sf "$CLI" "$HOME/.local/bin/morrow"
+
 echo "$APP"
+echo "CLI: $CLI"
+echo "Installed: $HOME/.local/bin/morrow"

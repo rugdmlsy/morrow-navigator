@@ -1,8 +1,10 @@
 import AppKit
+import MorrowNavigatorCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
+    private var commandServer: CommandIPCServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -14,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let controller = MainWindowController(initialWorkspace: initialURL)
         windowController = controller
+        commandServer = CommandIPCServer { [weak controller] arguments in
+            controller?.executeCommand(arguments: arguments) ?? .failure("Navigator window is unavailable.")
+        }
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -69,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh.keyEquivalentModifierMask = [.command]
         refresh.target = self
         viewMenu.addItem(refresh)
+        let focusCommand = NSMenuItem(title: "Focus Command", action: #selector(focusCommand), keyEquivalent: "l")
+        focusCommand.keyEquivalentModifierMask = [.command]
+        focusCommand.target = self
+        viewMenu.addItem(focusCommand)
     }
 
     @objc private func openWorkspace() {
@@ -89,5 +98,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refresh() {
         windowController?.refresh()
+    }
+
+    @objc private func focusCommand() {
+        _ = windowController?.executeCommand(arguments: ["ui", "focus"])
     }
 }

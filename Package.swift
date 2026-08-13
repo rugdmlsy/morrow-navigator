@@ -9,6 +9,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "MorrowNavigator", targets: ["MorrowNavigator"]),
+        .executable(name: "morrow", targets: ["MorrowNavigatorCLI"]),
         .executable(name: "MorrowNavigatorCoreSelfTest", targets: ["MorrowNavigatorCoreSelfTest"])
     ],
     targets: [
@@ -17,6 +18,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "MorrowNavigator",
+            dependencies: ["MorrowNavigatorCore"]
+        ),
+        .executableTarget(
+            name: "MorrowNavigatorCLI",
             dependencies: ["MorrowNavigatorCore"]
         ),
         .executableTarget(
