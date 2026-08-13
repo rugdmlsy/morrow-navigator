@@ -29,8 +29,7 @@ private final class InstantOutlineView: NSOutlineView {
         let point = convert(event.locationInWindow, from: nil)
         let clickedRow = row(at: point)
 
-        if event.clickCount == 1,
-           clickedRow >= 0,
+        if clickedRow >= 0,
            let node = item(atRow: clickedRow) as? FileNode,
            node.info.isNavigableDirectory {
             // The whole row is the interaction target. The disclosure triangle is
