@@ -45,12 +45,23 @@ private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
     }
 }
 
+private final class CommandTextField: NSTextField {
+    var onFocusRequest: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onFocusRequest?()
+        super.mouseDown(with: event)
+    }
+}
+
 @MainActor
 private final class CommandInputBackgroundView: NSVisualEffectView {
     weak var inputField: NSTextField?
+    var onFocusRequest: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         if let inputField {
+            onFocusRequest?()
             window?.makeFirstResponder(inputField)
             return
         }
@@ -132,7 +143,7 @@ final class MainWindowController: NSWindowController {
     private let pathControl = NSPathControl()
     private let statusLabel = NSTextField(labelWithString: "")
     private let commandOutputLabel = NSTextField(labelWithString: "")
-    private let commandField = NSTextField()
+    private let commandField = CommandTextField()
     private var lastCommandOutput = ""
     private var commandOutputPopover: NSPopover?
     private let backButton = NSButton()
@@ -372,10 +383,16 @@ final class MainWindowController: NSWindowController {
         commandField.drawsBackground = false
         commandField.target = self
         commandField.action = #selector(runCommandField)
+        commandField.onFocusRequest = { [weak self] in
+            self?.hideCommandPlaceholder()
+        }
 
         commandInputBackground.addSubview(promptLabel)
         commandInputBackground.addSubview(commandField)
         commandInputBackground.inputField = commandField
+        commandInputBackground.onFocusRequest = { [weak self] in
+            self?.hideCommandPlaceholder()
+        }
         promptLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(focusCommandField)))
 
         let statusSeparator = NSBox()
@@ -681,7 +698,12 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc private func focusCommandField() {
+        hideCommandPlaceholder()
         window?.makeFirstResponder(commandField)
+    }
+
+    private func hideCommandPlaceholder() {
+        commandField.placeholderAttributedString = nil
     }
 
     private func restoreCommandPlaceholder() {
@@ -732,6 +754,7 @@ final class MainWindowController: NSWindowController {
         case .forward:
             goForward()
         case .uiFocusCommand:
+            hideCommandPlaceholder()
             window?.makeFirstResponder(commandField)
         case .uiShow:
             window?.makeKeyAndOrderFront(nil)
@@ -750,7 +773,9 @@ final class MainWindowController: NSWindowController {
                 "selection=\(selected.joined(separator: ","))",
                 "window_width=\(Int(window?.frame.width ?? 0))",
                 "sidebar_width=\(Int(outlineView.enclosingScrollView?.frame.width ?? 0))",
-                "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))"
+                "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))",
+                "command_focused=\(commandField.currentEditor() != nil)",
+                "command_placeholder_visible=\(commandField.placeholderAttributedString != nil)"
             ].joined(separator: "\n")
             return .ok(output)
         }
