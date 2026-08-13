@@ -26,8 +26,25 @@ private final class InstantOutlineView: NSOutlineView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let clickedRow = row(at: point)
+        let clickedDisclosure = clickedRow >= 0 && frameOfOutlineCell(atRow: clickedRow).contains(point)
+
         beginInstantUpdates()
         super.mouseDown(with: event)
+
+        if event.clickCount == 1,
+           clickedRow >= 0,
+           !clickedDisclosure,
+           let node = item(atRow: clickedRow) as? FileNode,
+           node.info.isNavigableDirectory {
+            if isItemExpanded(node) {
+                super.collapseItem(node)
+            } else {
+                super.expandItem(node)
+            }
+        }
+
         endInstantUpdates()
     }
 
@@ -532,14 +549,7 @@ final class MainWindowController: NSWindowController {
     @objc private func outlineDoubleClicked() {
         let row = outlineView.clickedRow
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
-        if node.info.isNavigableDirectory {
-            if outlineView.isItemExpanded(node) {
-                outlineView.collapseItem(node)
-            } else {
-                outlineView.expandItem(node)
-            }
-            navigate(to: node.info.url, recordHistory: true, revealInSidebar: false)
-        } else {
+        if !node.info.isNavigableDirectory {
             NSWorkspace.shared.open(node.info.url)
         }
     }
