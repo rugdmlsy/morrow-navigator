@@ -2,6 +2,43 @@ import AppKit
 import MorrowNavigatorCore
 
 @MainActor
+private final class InstantOutlineView: NSOutlineView {
+    private func beginInstantUpdates() {
+        NSAnimationContext.beginGrouping()
+        NSAnimationContext.current.duration = 0
+        NSAnimationContext.current.allowsImplicitAnimation = false
+    }
+
+    private func endInstantUpdates() {
+        NSAnimationContext.endGrouping()
+    }
+
+    override func expandItem(_ item: Any?) {
+        beginInstantUpdates()
+        super.expandItem(item)
+        endInstantUpdates()
+    }
+
+    override func collapseItem(_ item: Any?) {
+        beginInstantUpdates()
+        super.collapseItem(item)
+        endInstantUpdates()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        beginInstantUpdates()
+        super.mouseDown(with: event)
+        endInstantUpdates()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        beginInstantUpdates()
+        super.keyDown(with: event)
+        endInstantUpdates()
+    }
+}
+
+@MainActor
 final class MainWindowController: NSWindowController {
     private let fileSystem = FileSystemService()
     private let iconCache = NSCache<NSString, NSImage>()
@@ -13,7 +50,7 @@ final class MainWindowController: NSWindowController {
     private var historyIndex = -1
     private var suppressOutlineSelection = false
 
-    private let outlineView = NSOutlineView()
+    private let outlineView = InstantOutlineView()
     private let tableView = NSTableView()
     private let workspaceLabel = NSTextField(labelWithString: "")
     private let pathControl = NSPathControl()
