@@ -46,6 +46,19 @@ private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
 }
 
 @MainActor
+private final class CommandInputBackgroundView: NSVisualEffectView {
+    weak var inputField: NSTextField?
+
+    override func mouseDown(with event: NSEvent) {
+        if let inputField {
+            window?.makeFirstResponder(inputField)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+}
+
+@MainActor
 private final class InstantOutlineView: NSOutlineView {
     private func beginInstantUpdates() {
         NSAnimationContext.beginGrouping()
@@ -330,7 +343,7 @@ final class MainWindowController: NSWindowController {
         commandOutputLabel.toolTip = "Click to view full command output"
         commandOutputLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(showFullCommandOutput)))
 
-        let commandInputBackground = NSVisualEffectView()
+        let commandInputBackground = CommandInputBackgroundView()
         commandInputBackground.translatesAutoresizingMaskIntoConstraints = false
         commandInputBackground.material = .hudWindow
         commandInputBackground.blendingMode = .withinWindow
@@ -347,6 +360,9 @@ final class MainWindowController: NSWindowController {
 
         commandField.translatesAutoresizingMaskIntoConstraints = false
         commandField.cell = VerticallyCenteredTextFieldCell(textCell: "")
+        commandField.isEditable = true
+        commandField.isSelectable = true
+        commandField.isEnabled = true
         commandField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         commandField.textColor = NSColor.white.withAlphaComponent(0.95)
         commandField.placeholderAttributedString = NSAttributedString(
@@ -361,6 +377,8 @@ final class MainWindowController: NSWindowController {
 
         commandInputBackground.addSubview(promptLabel)
         commandInputBackground.addSubview(commandField)
+        commandInputBackground.inputField = commandField
+        promptLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(focusCommandField)))
 
         let statusSeparator = NSBox()
         statusSeparator.translatesAutoresizingMaskIntoConstraints = false
@@ -662,6 +680,10 @@ final class MainWindowController: NSWindowController {
         case .failure(let error):
             showCommandResult(.failure(error.localizedDescription))
         }
+    }
+
+    @objc private func focusCommandField() {
+        window?.makeFirstResponder(commandField)
     }
 
     func executeCommand(arguments: [String]) -> NavigatorCommandResult {
