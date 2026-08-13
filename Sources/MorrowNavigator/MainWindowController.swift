@@ -278,6 +278,9 @@ final class MainWindowController: NSWindowController {
         commandOutputLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         commandOutputLabel.textColor = .secondaryLabelColor
         commandOutputLabel.lineBreakMode = .byTruncatingTail
+        commandOutputLabel.maximumNumberOfLines = 1
+        commandOutputLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        commandOutputLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         commandOutputLabel.toolTip = "Command output"
 
         let promptLabel = NSTextField(labelWithString: ">")
@@ -648,7 +651,10 @@ final class MainWindowController: NSWindowController {
                 "workspace=\(workspace)",
                 "cwd=\(directory)",
                 "items=\(tableItems.count)",
-                "selection=\(selected.joined(separator: ","))"
+                "selection=\(selected.joined(separator: ","))",
+                "window_width=\(Int(window?.frame.width ?? 0))",
+                "sidebar_width=\(Int(outlineView.enclosingScrollView?.frame.width ?? 0))",
+                "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))"
             ].joined(separator: "\n")
             return .ok(output)
         }
