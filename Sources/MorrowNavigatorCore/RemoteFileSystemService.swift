@@ -12,13 +12,15 @@ public enum RemoteHostKind: String, Sendable, Codable, CaseIterable {
     }
 }
 
-public struct RemoteHost: Sendable, Equatable, Hashable {
+public struct RemoteHost: Sendable, Equatable, Hashable, Codable {
     public let alias: String
     public let hostname: String?
     public let user: String?
     public let port: Int?
     public let identityFile: String?
     public let kind: RemoteHostKind
+    public let displayName: String?
+    public let rootPath: String
 
     public init(
         alias: String,
@@ -26,7 +28,9 @@ public struct RemoteHost: Sendable, Equatable, Hashable {
         user: String? = nil,
         port: Int? = nil,
         identityFile: String? = nil,
-        kind: RemoteHostKind = .ssh
+        kind: RemoteHostKind = .ssh,
+        displayName: String? = nil,
+        rootPath: String = "/"
     ) {
         self.alias = alias
         self.hostname = hostname
@@ -34,13 +38,42 @@ public struct RemoteHost: Sendable, Equatable, Hashable {
         self.port = port
         self.identityFile = identityFile
         self.kind = kind
+        self.displayName = displayName
+        self.rootPath = RemoteLocation(host: alias, path: rootPath).path
+    }
+
+    public var id: String { "\(alias)|\(rootPath)|\(displayName ?? "")" }
+
+    public var navigationLocation: RemoteLocation {
+        RemoteLocation(host: alias, path: rootPath)
     }
 
     public var endpointDescription: String {
+        if kind == .github, rootPath != "/" {
+            return "github.com\(rootPath)"
+        }
         let host = hostname ?? alias
         let userPrefix = user.map { "\($0)@" } ?? ""
         let portSuffix = port.map { $0 == 22 ? "" : ":\($0)" } ?? ""
         return userPrefix + host + portSuffix
+    }
+}
+
+public struct GitHubRepository: Sendable, Equatable, Codable {
+    public let name: String
+    public let fullName: String
+    public let updatedAt: String?
+
+    public init(name: String, fullName: String, updatedAt: String?) {
+        self.name = name
+        self.fullName = fullName
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case fullName = "full_name"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -321,18 +354,6 @@ public struct RemoteFileSystemService: Sendable {
         let isHidden: Bool
     }
 
-    private struct GitHubRepositoryPayload: Decodable {
-        let name: String
-        let fullName: String
-        let updatedAt: String?
-
-        enum CodingKeys: String, CodingKey {
-            case name
-            case fullName = "full_name"
-            case updatedAt = "updated_at"
-        }
-    }
-
     private struct GitHubContentPayload: Decodable {
         let name: String
         let path: String
@@ -560,10 +581,14 @@ print(json.dumps(items, ensure_ascii=False))
         return String(host.dropFirst(prefix.count))
     }
 
-    private func githubRepositories(host: String) throws -> [GitHubRepositoryPayload] {
+    public func githubRepositories() throws -> [GitHubRepository] {
+        try githubRepositories(host: "github.com")
+    }
+
+    private func githubRepositories(host: String) throws -> [GitHubRepository] {
         let endpoint = "/user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=updated"
         let data = try runGitHub(host: host, arguments: ["api", "--paginate", "--slurp", endpoint])
-        guard let pages = try? JSONDecoder().decode([[GitHubRepositoryPayload]].self, from: data) else {
+        guard let pages = try? JSONDecoder().decode([[GitHubRepository]].self, from: data) else {
             throw RemoteFileSystemError.invalidResponse(host: host)
         }
         return pages.flatMap { $0 }

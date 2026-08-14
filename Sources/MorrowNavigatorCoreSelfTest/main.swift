@@ -78,6 +78,20 @@ func run() throws {
     let updatedSSHConfig = try String(contentsOf: sshConfig, encoding: .utf8)
     try expect(updatedSSHConfig.contains("Host gamma\n    HostName 10.0.0.8\n    User dev\n    Port 2202"), "new SSH host block was not written correctly")
 
+    let repositoryShortcut = RemoteHost(
+        alias: "github.com",
+        hostname: "github.com",
+        user: "git",
+        kind: .github,
+        displayName: "reslab-asu/agent-rollback-protocol",
+        rootPath: "/reslab-asu/agent-rollback-protocol"
+    )
+    try expect(repositoryShortcut.navigationLocation == RemoteLocation(host: "github.com", path: "/reslab-asu/agent-rollback-protocol"), "GitHub repository shortcut navigation path was incorrect")
+    try expect(repositoryShortcut.endpointDescription == "github.com/reslab-asu/agent-rollback-protocol", "GitHub repository shortcut endpoint description was incorrect")
+    let shortcutData = try JSONEncoder().encode([repositoryShortcut])
+    let decodedShortcuts = try JSONDecoder().decode([RemoteHost].self, from: shortcutData)
+    try expect(decodedShortcuts == [repositoryShortcut], "GitHub repository shortcut did not persist through Codable")
+
     let remoteRoot = RemoteLocation(host: "alpha", path: "/")
     let remoteChild = remoteRoot.appending("var").appending("log")
     try expect(remoteChild.displayPath == "alpha:/var/log", "remote path append failed: \(remoteChild.displayPath)")
@@ -149,6 +163,8 @@ func run() throws {
     if let githubHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_HOST"], !githubHost.isEmpty {
         let githubService = RemoteFileSystemService()
         try expect(githubService.isGitHubHost(githubHost), "GitHub SSH alias was not detected: \(githubHost)")
+        let accessibleRepositories = try githubService.githubRepositories()
+        try expect(!accessibleRepositories.isEmpty, "GitHub repository picker source was empty")
         let owner = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_OWNER"]
         let rootItems = try githubService.children(of: RemoteLocation(host: githubHost, path: "/"))
         try expect(!rootItems.isEmpty, "GitHub root did not return items")
@@ -164,6 +180,9 @@ func run() throws {
         try expect(!repositories.isEmpty, "GitHub repository list was empty for \(githubHost)")
         let repository = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_REPO"] ?? repositories[0].name
         try expect(repositories.contains(where: { $0.name == repository }), "GitHub repository \(repository) was not visible at the expected level")
+        if let owner {
+            try expect(accessibleRepositories.contains(where: { $0.fullName == "\(owner)/\(repository)" }), "GitHub repository picker did not expose \(owner)/\(repository)")
+        }
         let repositoryPath = scopedOwner == nil
             ? "/\(owner ?? rootItems[0].name)/\(repository)"
             : "/\(repository)"

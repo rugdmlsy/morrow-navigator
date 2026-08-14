@@ -366,9 +366,9 @@ final class MainWindowController: NSWindowController {
         }
 
         for host in remoteHosts {
-            let button = NSButton(title: host.alias, target: self, action: #selector(openRemoteHost(_:)))
+            let button = NSButton(title: host.displayName ?? host.alias, target: self, action: #selector(openRemoteHost(_:)))
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.identifier = NSUserInterfaceItemIdentifier(host.alias)
+            button.identifier = NSUserInterfaceItemIdentifier(host.id)
             let symbol = host.kind == .github ? "chevron.left.forwardslash.chevron.right" : "server.rack"
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: host.kind.displayName)
             button.imagePosition = .imageLeading
@@ -377,7 +377,8 @@ final class MainWindowController: NSWindowController {
             button.isBordered = false
             button.toolTip = "\(host.kind.displayName) · \(host.endpointDescription)"
 
-            let kindBadge = NSTextField(labelWithString: host.kind == .github ? "GITHUB" : "SSH")
+            let badge = host.kind == .github && host.rootPath != "/" ? "GH REPO" : (host.kind == .github ? "GITHUB" : "SSH")
+            let kindBadge = NSTextField(labelWithString: badge)
             kindBadge.font = .systemFont(ofSize: 8.5, weight: .semibold)
             kindBadge.textColor = .tertiaryLabelColor
             kindBadge.alignment = .right
@@ -385,8 +386,8 @@ final class MainWindowController: NSWindowController {
 
             let removeButton = NSButton()
             configureSymbolButton(removeButton, symbol: "minus.circle", action: #selector(removeRemoteHost(_:)))
-            removeButton.identifier = NSUserInterfaceItemIdentifier(host.alias)
-            removeButton.toolTip = "Remove \(host.alias) from Navigator"
+            removeButton.identifier = NSUserInterfaceItemIdentifier(host.id)
+            removeButton.toolTip = "Remove \(host.displayName ?? host.alias) from Navigator"
             let row = NSStackView(views: [button, kindBadge, removeButton])
             row.translatesAutoresizingMaskIntoConstraints = false
             row.orientation = .horizontal
@@ -399,28 +400,45 @@ final class MainWindowController: NSWindowController {
     }
 
     private var remoteHostAliasesDefaultsKey: String { "remoteHostAliases.v1" }
+    private var remoteHostsDefaultsKey: String { "remoteHosts.v2" }
 
     private func loadManagedRemoteHosts() -> [RemoteHost] {
         let defaults = UserDefaults.standard
         let discovered = sshConfigDiscovery.hosts()
         let discoveredByAlias = Dictionary(uniqueKeysWithValues: discovered.map { ($0.alias, $0) })
-        if let aliases = defaults.stringArray(forKey: remoteHostAliasesDefaultsKey) {
-            return aliases.map { discoveredByAlias[$0] ?? RemoteHost(alias: $0) }.sorted {
-                $0.alias.localizedStandardCompare($1.alias) == .orderedAscending
+        if let data = defaults.data(forKey: remoteHostsDefaultsKey),
+           let hosts = try? JSONDecoder().decode([RemoteHost].self, from: data) {
+            return hosts.sorted {
+                ($0.displayName ?? $0.alias).localizedStandardCompare($1.displayName ?? $1.alias) == .orderedAscending
             }
         }
-        defaults.set(discovered.map(\.alias), forKey: remoteHostAliasesDefaultsKey)
+        if let aliases = defaults.stringArray(forKey: remoteHostAliasesDefaultsKey) {
+            let migrated = aliases.map { discoveredByAlias[$0] ?? RemoteHost(alias: $0) }.sorted {
+                $0.alias.localizedStandardCompare($1.alias) == .orderedAscending
+            }
+            if let data = try? JSONEncoder().encode(migrated) {
+                defaults.set(data, forKey: remoteHostsDefaultsKey)
+            }
+            return migrated
+        }
+        if let data = try? JSONEncoder().encode(discovered) {
+            defaults.set(data, forKey: remoteHostsDefaultsKey)
+        }
         return discovered
     }
 
     private func persistRemoteHosts() {
-        UserDefaults.standard.set(remoteHosts.map(\.alias), forKey: remoteHostAliasesDefaultsKey)
+        if let data = try? JSONEncoder().encode(remoteHosts) {
+            UserDefaults.standard.set(data, forKey: remoteHostsDefaultsKey)
+        }
     }
 
     private func addManagedRemoteHost(_ host: RemoteHost) {
-        guard !remoteHosts.contains(where: { $0.alias == host.alias }) else { return }
+        guard !remoteHosts.contains(where: { $0.id == host.id }) else { return }
         remoteHosts.append(host)
-        remoteHosts.sort { $0.alias.localizedStandardCompare($1.alias) == .orderedAscending }
+        remoteHosts.sort {
+            ($0.displayName ?? $0.alias).localizedStandardCompare($1.displayName ?? $1.alias) == .orderedAscending
+        }
         persistRemoteHosts()
         rebuildRemoteHostButtons()
     }
@@ -1398,21 +1416,23 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc private func openRemoteHost(_ sender: NSButton) {
-        guard let alias = sender.identifier?.rawValue, !alias.isEmpty else { return }
-        navigate(to: RemoteLocation(host: alias, path: "/").url, recordHistory: true, revealInSidebar: false)
+        guard let id = sender.identifier?.rawValue,
+              let host = remoteHosts.first(where: { $0.id == id }) else { return }
+        navigate(to: host.navigationLocation.url, recordHistory: true, revealInSidebar: false)
     }
 
     @objc private func addRemoteHost() {
         guard let window else { return }
-        let existingAliases = Set(remoteHosts.map(\.alias))
+        let existingAliases = Set(remoteHosts.filter { $0.rootPath == "/" }.map(\.alias))
         let availableHosts = sshConfigDiscovery.hosts().filter { !existingAliases.contains($0.alias) }
         let picker = RemoteConnectionPickerView(hosts: availableHosts)
 
         let alert = NSAlert()
         alert.messageText = "Add Remote Connection"
-        alert.informativeText = "Choose a connection already configured in OpenSSH, or create a new SSH entry. GitHub aliases are detected from HostName automatically."
+        alert.informativeText = "Choose a configured connection, add a GitHub repository directly, or create a new SSH entry."
         let addButton = alert.addButton(withTitle: "Add Selected")
         addButton.isEnabled = !availableHosts.isEmpty
+        alert.addButton(withTitle: "GitHub Repository…")
         alert.addButton(withTitle: "New SSH…")
         alert.addButton(withTitle: "Cancel")
         alert.accessoryView = picker
@@ -1423,10 +1443,56 @@ final class MainWindowController: NSWindowController {
                     self.addManagedRemoteHost(host)
                 }
             } else if response == .alertSecondButtonReturn {
+                self.loadGitHubRepositoriesAndPresentPicker()
+            } else if response == .alertThirdButtonReturn {
                 DispatchQueue.main.async { [weak self] in
                     self?.presentNewSSHConnectionSheet()
                 }
             }
+        }
+    }
+
+    private func loadGitHubRepositoriesAndPresentPicker() {
+        let service = remoteFileSystem
+        Task { [weak self] in
+            do {
+                let repositories = try await Task.detached(priority: .userInitiated) {
+                    try service.githubRepositories()
+                }.value
+                self?.presentGitHubRepositorySheet(repositories)
+            } catch {
+                self?.presentRemoteConnectionError(error.localizedDescription)
+            }
+        }
+    }
+
+    private func presentGitHubRepositorySheet(_ repositories: [GitHubRepository]) {
+        guard let window else { return }
+        let existing = Set(remoteHosts.filter { $0.kind == .github && $0.rootPath != "/" }.map(\.rootPath))
+        let available = repositories.filter { !existing.contains("/" + $0.fullName) }
+        let picker = GitHubRepositoryPickerView(repositories: available)
+        let alert = NSAlert()
+        alert.messageText = "Add GitHub Repository"
+        alert.informativeText = available.isEmpty
+            ? "All accessible GitHub repositories are already added."
+            : "Choose a repository from the account authenticated by gh."
+        let addButton = alert.addButton(withTitle: "Add Repository")
+        addButton.isEnabled = !available.isEmpty
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = picker
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn,
+                  let self,
+                  let repository = picker.selectedRepository else { return }
+            let host = RemoteHost(
+                alias: "github.com",
+                hostname: "github.com",
+                user: "git",
+                kind: .github,
+                displayName: repository.fullName,
+                rootPath: "/" + repository.fullName
+            )
+            self.addManagedRemoteHost(host)
         }
     }
 
@@ -1470,8 +1536,8 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc private func removeRemoteHost(_ sender: NSButton) {
-        guard let alias = sender.identifier?.rawValue else { return }
-        remoteHosts.removeAll { $0.alias == alias }
+        guard let id = sender.identifier?.rawValue else { return }
+        remoteHosts.removeAll { $0.id == id }
         persistRemoteHosts()
         rebuildRemoteHostButtons()
     }

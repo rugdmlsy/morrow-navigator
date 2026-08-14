@@ -62,6 +62,86 @@ final class RemoteConnectionPickerView: NSView {
 }
 
 @MainActor
+final class GitHubRepositoryPickerView: NSView {
+    private let repositories: [GitHubRepository]
+    private var filteredRepositories: [GitHubRepository]
+    private let searchField = NSSearchField()
+    private let popup = NSPopUpButton()
+
+    init(repositories: [GitHubRepository]) {
+        self.repositories = repositories
+        self.filteredRepositories = repositories
+        super.init(frame: NSRect(x: 0, y: 0, width: 440, height: 108))
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "GitHub Repository")
+        title.font = .systemFont(ofSize: 12, weight: .semibold)
+
+        searchField.placeholderString = "Filter owner/repository"
+        searchField.target = self
+        searchField.action = #selector(filterRepositories)
+
+        let note = NSTextField(labelWithString: "Repositories are loaded from the account authenticated by gh. Private repositories are included when your token allows them.")
+        note.font = .systemFont(ofSize: 10.5)
+        note.textColor = .secondaryLabelColor
+        note.maximumNumberOfLines = 2
+        note.lineBreakMode = .byWordWrapping
+
+        reloadPopup()
+        let stack = NSStackView(views: [title, searchField, popup, note])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 7
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 440),
+            heightAnchor.constraint(equalToConstant: 108),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            searchField.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            popup.widthAnchor.constraint(equalTo: stack.widthAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    var selectedRepository: GitHubRepository? {
+        guard filteredRepositories.indices.contains(popup.indexOfSelectedItem) else { return nil }
+        return filteredRepositories[popup.indexOfSelectedItem]
+    }
+
+    @objc private func filterRepositories() {
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty {
+            filteredRepositories = repositories
+        } else {
+            filteredRepositories = repositories.filter {
+                $0.fullName.localizedCaseInsensitiveContains(query)
+            }
+        }
+        reloadPopup()
+    }
+
+    private func reloadPopup() {
+        popup.removeAllItems()
+        if filteredRepositories.isEmpty {
+            popup.addItem(withTitle: "No matching repositories")
+            popup.isEnabled = false
+        } else {
+            popup.isEnabled = true
+            for repository in filteredRepositories {
+                popup.addItem(withTitle: repository.fullName)
+            }
+        }
+    }
+}
+
+@MainActor
 final class NewSSHConnectionView: NSView {
     private let aliasField = NSTextField()
     private let hostnameField = NSTextField()
