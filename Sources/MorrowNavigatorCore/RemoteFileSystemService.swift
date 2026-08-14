@@ -237,6 +237,25 @@ print(json.dumps(items, ensure_ascii=False))
         let components = location.path
             .split(separator: "/", omittingEmptySubsequences: true)
             .map(String.init)
+        let ownerScope = githubOwnerScope(for: location.host)
+
+        if components.isEmpty, let ownerScope {
+            return try githubRepositories(host: location.host)
+                .filter { $0.fullName.hasPrefix(ownerScope + "/") }
+                .map { repository in
+                    FileInfo(
+                        url: location.appending(repository.name).url,
+                        name: repository.name,
+                        isDirectory: true,
+                        isPackage: false,
+                        size: nil,
+                        modifiedAt: parseGitHubDate(repository.updatedAt),
+                        isHidden: repository.name.hasPrefix(".")
+                    )
+                }
+                .filter { includeHidden || !$0.isHidden }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
 
         if components.isEmpty {
             let repositories = try githubRepositories(host: location.host)
@@ -258,6 +277,19 @@ print(json.dumps(items, ensure_ascii=False))
             }
             .filter { includeHidden || !$0.isHidden }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+
+        if let ownerScope {
+            let repository = components[0]
+            let repositoryPath = components.dropFirst().joined(separator: "/")
+            return try githubRepositoryContents(
+                host: location.host,
+                owner: ownerScope,
+                repository: repository,
+                repositoryPath: repositoryPath,
+                virtualBaseComponents: [repository],
+                includeHidden: includeHidden
+            )
         }
 
         if components.count == 1 {
@@ -282,6 +314,24 @@ print(json.dumps(items, ensure_ascii=False))
         let owner = components[0]
         let repository = components[1]
         let repositoryPath = components.dropFirst(2).joined(separator: "/")
+        return try githubRepositoryContents(
+            host: location.host,
+            owner: owner,
+            repository: repository,
+            repositoryPath: repositoryPath,
+            virtualBaseComponents: [owner, repository],
+            includeHidden: includeHidden
+        )
+    }
+
+    private func githubRepositoryContents(
+        host: String,
+        owner: String,
+        repository: String,
+        repositoryPath: String,
+        virtualBaseComponents: [String],
+        includeHidden: Bool
+    ) throws -> [FileInfo] {
         var endpoint = "/repos/\(encodeGitHubPathComponent(owner))/\(encodeGitHubPathComponent(repository))/contents"
         if !repositoryPath.isEmpty {
             endpoint += "/" + repositoryPath
@@ -290,16 +340,16 @@ print(json.dumps(items, ensure_ascii=False))
                 .joined(separator: "/")
         }
 
-        let data = try runGitHub(host: location.host, arguments: ["api", endpoint])
+        let data = try runGitHub(host: host, arguments: ["api", endpoint])
         guard let payloads = try? JSONDecoder().decode([GitHubContentPayload].self, from: data) else {
-            throw RemoteFileSystemError.invalidResponse(host: location.host)
+            throw RemoteFileSystemError.invalidResponse(host: host)
         }
 
         return payloads.compactMap { payload in
             let hidden = payload.name.hasPrefix(".")
             if hidden && !includeHidden { return nil }
-            let virtualPath = "/" + [owner, repository, payload.path].filter { !$0.isEmpty }.joined(separator: "/")
-            let itemLocation = RemoteLocation(host: location.host, path: virtualPath)
+            let virtualPath = "/" + (virtualBaseComponents + [payload.path]).filter { !$0.isEmpty }.joined(separator: "/")
+            let itemLocation = RemoteLocation(host: host, path: virtualPath)
             return FileInfo(
                 url: itemLocation.url,
                 name: payload.name,
@@ -315,6 +365,12 @@ print(json.dumps(items, ensure_ascii=False))
             }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
+    }
+
+    private func githubOwnerScope(for host: String) -> String? {
+        let prefix = "github-"
+        guard host.lowercased().hasPrefix(prefix), host.count > prefix.count else { return nil }
+        return String(host.dropFirst(prefix.count))
     }
 
     private func githubRepositories(host: String) throws -> [GitHubRepositoryPayload] {

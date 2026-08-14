@@ -121,17 +121,29 @@ func run() throws {
     if let githubHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_HOST"], !githubHost.isEmpty {
         let githubService = RemoteFileSystemService()
         try expect(githubService.isGitHubHost(githubHost), "GitHub SSH alias was not detected: \(githubHost)")
-        let owners = try githubService.children(of: RemoteLocation(host: githubHost, path: "/"))
-        try expect(!owners.isEmpty, "GitHub root did not return repository owners")
-        let owner = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_OWNER"] ?? owners[0].name
-        let repositories = try githubService.children(of: RemoteLocation(host: githubHost, path: "/\(owner)"))
-        try expect(!repositories.isEmpty, "GitHub owner \(owner) did not return repositories")
+        let owner = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_OWNER"]
+        let rootItems = try githubService.children(of: RemoteLocation(host: githubHost, path: "/"))
+        try expect(!rootItems.isEmpty, "GitHub root did not return items")
+        let scopedOwner = githubHost.lowercased().hasPrefix("github-") ? String(githubHost.dropFirst("github-".count)) : nil
+        let repositories: [FileInfo]
+        if let scopedOwner {
+            try expect(owner == nil || owner == scopedOwner, "GitHub alias owner scope mismatch: \(githubHost) -> \(scopedOwner)")
+            repositories = rootItems
+        } else {
+            let selectedOwner = owner ?? rootItems[0].name
+            repositories = try githubService.children(of: RemoteLocation(host: githubHost, path: "/\(selectedOwner)"))
+        }
+        try expect(!repositories.isEmpty, "GitHub repository list was empty for \(githubHost)")
         let repository = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_REPO"] ?? repositories[0].name
+        try expect(repositories.contains(where: { $0.name == repository }), "GitHub repository \(repository) was not visible at the expected level")
+        let repositoryPath = scopedOwner == nil
+            ? "/\(owner ?? rootItems[0].name)/\(repository)"
+            : "/\(repository)"
         let repositoryItems = try githubService.children(
-            of: RemoteLocation(host: githubHost, path: "/\(owner)/\(repository)")
+            of: RemoteLocation(host: githubHost, path: repositoryPath)
         )
-        try expect(!repositoryItems.isEmpty, "GitHub repository \(owner)/\(repository) root was unexpectedly empty")
-        print("GitHub integration: PASS (\(githubHost), \(owner)/\(repository), \(repositoryItems.count) root items)")
+        try expect(!repositoryItems.isEmpty, "GitHub repository \(repository) root was unexpectedly empty")
+        print("GitHub integration: PASS (\(githubHost), \(repository), \(repositoryItems.count) root items)")
     }
 }
 
