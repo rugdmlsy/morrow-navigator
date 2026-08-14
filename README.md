@@ -17,14 +17,14 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 - External `morrow-navigator` CLI (`mnavi` short alias) using the same command parser and command engine
 - Live GUI synchronization for CLI mutations
 - Lightweight current-directory watcher for changes made by ordinary shell tools such as `touch`, `mv`, and `rm`
-- Read-only remote directory browsing over the system SSH client, with Navigator-managed remote shortcuts and optional import from `~/.ssh/config`
+- Read-only remote directory browsing over SSH plus GitHub repository browsing for SSH aliases that resolve to `github.com`
 - Restore the last workspace on launch
 
 Hidden files remain omitted from the GUI by default; `ls -a` can inspect them from the command interface.
 
 Remote connections appear in the sidebar under **REMOTE**. Use **+** to add any SSH alias/host accepted by the system `ssh` client, the import button to merge literal aliases from `~/.ssh/config`, and the minus button beside a remote to remove only its Navigator shortcut. Navigator does not edit `~/.ssh/config` or store SSH credentials.
 
-Remote directory listings are cached lazily under `~/Library/Caches/MorrowNavigator/RemoteDirectories`. Revisiting a directory renders cached metadata immediately while an SSH refresh runs in the background; fresh results replace stale cache entries. OpenSSH connection multiplexing is kept alive briefly to reduce repeated handshake latency while moving through a remote tree. Remote folders can also be promoted to the main workspace root, so the left explorer uses cached remote nodes and refreshes expanded folders asynchronously. Remote browsing remains read-only for now, and local-only actions such as **Reveal in Finder** stay disabled. The remote host must provide `python3` for structured directory metadata collection.
+Remote directory listings are cached lazily under `~/Library/Caches/MorrowNavigator/RemoteDirectories`. Revisiting a directory renders cached metadata immediately while a background refresh runs; fresh results replace stale cache entries. Ordinary SSH hosts use a short-lived OpenSSH multiplexed connection and require remote `python3` for structured metadata. SSH aliases that resolve to `github.com` are treated as a virtual repository filesystem instead: Navigator uses the authenticated GitHub CLI (`gh`) to list accessible owners, repositories, and repository contents, because GitHub SSH intentionally provides Git transport rather than shell access. GitHub browsing requires `gh auth login`. Remote folders can also be promoted to the main workspace root, and remote browsing remains read-only for now.
 
 ## Command model
 

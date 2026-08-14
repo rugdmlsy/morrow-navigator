@@ -117,6 +117,22 @@ func run() throws {
         try expect(remoteItems.allSatisfy { RemoteLocation(url: $0.url)?.host == sshHost }, "remote listing returned invalid URLs")
         print("Remote SSH integration: PASS (\(sshHost), \(remoteItems.count) root items)")
     }
+
+    if let githubHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_HOST"], !githubHost.isEmpty {
+        let githubService = RemoteFileSystemService()
+        try expect(githubService.isGitHubHost(githubHost), "GitHub SSH alias was not detected: \(githubHost)")
+        let owners = try githubService.children(of: RemoteLocation(host: githubHost, path: "/"))
+        try expect(!owners.isEmpty, "GitHub root did not return repository owners")
+        let owner = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_OWNER"] ?? owners[0].name
+        let repositories = try githubService.children(of: RemoteLocation(host: githubHost, path: "/\(owner)"))
+        try expect(!repositories.isEmpty, "GitHub owner \(owner) did not return repositories")
+        let repository = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_REPO"] ?? repositories[0].name
+        let repositoryItems = try githubService.children(
+            of: RemoteLocation(host: githubHost, path: "/\(owner)/\(repository)")
+        )
+        try expect(!repositoryItems.isEmpty, "GitHub repository \(owner)/\(repository) root was unexpectedly empty")
+        print("GitHub integration: PASS (\(githubHost), \(owner)/\(repository), \(repositoryItems.count) root items)")
+    }
 }
 
 do {

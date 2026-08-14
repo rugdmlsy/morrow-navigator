@@ -779,6 +779,7 @@ final class MainWindowController: NSWindowController {
     private func navigateRemote(to location: RemoteLocation, recordHistory: Bool, revealInSidebar: Bool) {
         let requestID = UUID()
         remoteNavigationRequestID = requestID
+        let isGitHub = remoteFileSystem.isGitHubHost(location.host)
         directoryWatcher.stop()
         browserRevealButton.isEnabled = false
         currentDirectory = location.url
@@ -790,9 +791,10 @@ final class MainWindowController: NSWindowController {
         tableView.reloadData()
         tableView.deselectAll(nil)
         if let cached {
-            statusLabel.stringValue = "Cached · \(cached.items.count) item\(cached.items.count == 1 ? "" : "s") · refreshing \(location.host)…"
+            let source = isGitHub ? "GitHub" : location.host
+            statusLabel.stringValue = "Cached · \(cached.items.count) item\(cached.items.count == 1 ? "" : "s") · refreshing \(source)…"
         } else {
-            statusLabel.stringValue = "Connecting to \(location.host)…"
+            statusLabel.stringValue = isGitHub ? "Loading GitHub repositories…" : "Connecting to \(location.host)…"
         }
         if recordHistory {
             recordNavigationHistory(location.url)
@@ -818,7 +820,8 @@ final class MainWindowController: NSWindowController {
                     self.tableView.reloadData()
                     self.tableView.deselectAll(nil)
                 }
-                self.statusLabel.stringValue = "\(location.host) · \(items.count) item\(items.count == 1 ? "" : "s")"
+                let source = isGitHub ? "\(location.host) · GitHub" : location.host
+                self.statusLabel.stringValue = "\(source) · \(items.count) item\(items.count == 1 ? "" : "s")"
                 self.updateRemoteWorkspaceNode(location: location, items: items)
                 if revealInSidebar {
                     self.selectRemoteDirectoryInSidebar(location)
