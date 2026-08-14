@@ -1,32 +1,39 @@
 import AppKit
 import QuickLookUI
 
+struct FilePreviewDetails {
+    let name: String
+    let kind: String
+    let size: String
+    let modified: String
+    let path: String
+}
+
 @MainActor
 final class FilePreviewPane: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
-    private let detailLabel = NSTextField(labelWithString: "")
     private let previewView: QLPreviewView = QLPreviewView(frame: .zero, style: .normal)!
     private let messageLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
+
+    private let detailsSeparator = NSBox()
+    private let kindValue = NSTextField(labelWithString: "—")
+    private let sizeValue = NSTextField(labelWithString: "—")
+    private let modifiedValue = NSTextField(labelWithString: "—")
+    private let pathValue = NSTextField(wrappingLabelWithString: "—")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
 
-        let separator = NSBox()
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.boxType = .separator
+        let sideSeparator = NSBox()
+        sideSeparator.translatesAutoresizingMaskIntoConstraints = false
+        sideSeparator.boxType = .separator
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.maximumNumberOfLines = 1
-
-        detailLabel.translatesAutoresizingMaskIntoConstraints = false
-        detailLabel.font = .systemFont(ofSize: 10.5)
-        detailLabel.textColor = .secondaryLabelColor
-        detailLabel.lineBreakMode = .byTruncatingMiddle
-        detailLabel.maximumNumberOfLines = 1
 
         previewView.translatesAutoresizingMaskIntoConstraints = false
         previewView.autostarts = true
@@ -44,39 +51,83 @@ final class FilePreviewPane: NSView {
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
 
-        addSubview(separator)
+        detailsSeparator.translatesAutoresizingMaskIntoConstraints = false
+        detailsSeparator.boxType = .separator
+
+        [kindValue, sizeValue, modifiedValue].forEach { field in
+            field.font = .systemFont(ofSize: 10.5)
+            field.textColor = .labelColor
+            field.lineBreakMode = .byTruncatingMiddle
+            field.maximumNumberOfLines = 1
+        }
+        pathValue.font = .systemFont(ofSize: 10.5)
+        pathValue.textColor = .labelColor
+        pathValue.maximumNumberOfLines = 2
+        pathValue.lineBreakMode = .byTruncatingMiddle
+
+        let detailsTitle = NSTextField(labelWithString: "DETAILS")
+        detailsTitle.font = .systemFont(ofSize: 9.5, weight: .semibold)
+        detailsTitle.textColor = .secondaryLabelColor
+
+        let detailsGrid = NSGridView(views: [
+            [detailLabel("Kind"), kindValue],
+            [detailLabel("Size"), sizeValue],
+            [detailLabel("Modified"), modifiedValue],
+            [detailLabel("Path"), pathValue]
+        ])
+        detailsGrid.translatesAutoresizingMaskIntoConstraints = false
+        detailsGrid.rowSpacing = 5
+        detailsGrid.columnSpacing = 9
+        detailsGrid.column(at: 0).xPlacement = .trailing
+        detailsGrid.column(at: 1).xPlacement = .fill
+        detailsGrid.column(at: 0).width = 53
+
+        let detailsStack = NSStackView(views: [detailsTitle, detailsGrid])
+        detailsStack.translatesAutoresizingMaskIntoConstraints = false
+        detailsStack.orientation = .vertical
+        detailsStack.alignment = .leading
+        detailsStack.spacing = 7
+
+        addSubview(sideSeparator)
         addSubview(titleLabel)
-        addSubview(detailLabel)
         addSubview(previewView)
         addSubview(messageLabel)
         addSubview(spinner)
+        addSubview(detailsSeparator)
+        addSubview(detailsStack)
 
         NSLayoutConstraint.activate([
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
-            separator.topAnchor.constraint(equalTo: topAnchor),
-            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            sideSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            sideSeparator.topAnchor.constraint(equalTo: topAnchor),
+            sideSeparator.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
             titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 10),
             titleLabel.heightAnchor.constraint(equalToConstant: 16),
 
-            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
-            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            detailLabel.heightAnchor.constraint(equalToConstant: 14),
-
             previewView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
             previewView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            previewView.topAnchor.constraint(equalTo: detailLabel.bottomAnchor, constant: 6),
-            previewView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            previewView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
+            previewView.bottomAnchor.constraint(equalTo: detailsSeparator.topAnchor),
 
             messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
             messageLabel.centerYAnchor.constraint(equalTo: previewView.centerYAnchor),
 
             spinner.centerXAnchor.constraint(equalTo: previewView.centerXAnchor),
-            spinner.bottomAnchor.constraint(equalTo: messageLabel.topAnchor, constant: -10)
+            spinner.bottomAnchor.constraint(equalTo: messageLabel.topAnchor, constant: -10),
+
+            detailsSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            detailsSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            detailsSeparator.bottomAnchor.constraint(equalTo: detailsStack.topAnchor, constant: -9),
+
+            detailsStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            detailsStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            detailsStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            detailsGrid.widthAnchor.constraint(equalTo: detailsStack.widthAnchor),
+
+            previewView.heightAnchor.constraint(greaterThanOrEqualToConstant: 120)
         ])
     }
 
@@ -84,9 +135,8 @@ final class FilePreviewPane: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func showPreview(url: URL, title: String, detail: String) {
-        titleLabel.stringValue = title
-        detailLabel.stringValue = detail
+    func showPreview(url: URL, details: FilePreviewDetails) {
+        apply(details)
         messageLabel.isHidden = true
         spinner.stopAnimation(nil)
         previewView.isHidden = false
@@ -94,9 +144,8 @@ final class FilePreviewPane: NSView {
         previewView.refreshPreviewItem()
     }
 
-    func showLoading(title: String, detail: String) {
-        titleLabel.stringValue = title
-        detailLabel.stringValue = detail
+    func showLoading(details: FilePreviewDetails) {
+        apply(details)
         previewView.previewItem = nil
         previewView.isHidden = true
         messageLabel.stringValue = "Loading preview…"
@@ -104,9 +153,8 @@ final class FilePreviewPane: NSView {
         spinner.startAnimation(nil)
     }
 
-    func showMessage(title: String, detail: String, message: String) {
-        titleLabel.stringValue = title
-        detailLabel.stringValue = detail
+    func showMessage(details: FilePreviewDetails, message: String) {
+        apply(details)
         previewView.previewItem = nil
         previewView.isHidden = true
         spinner.stopAnimation(nil)
@@ -121,6 +169,27 @@ final class FilePreviewPane: NSView {
         messageLabel.stringValue = ""
         messageLabel.isHidden = true
         titleLabel.stringValue = ""
-        detailLabel.stringValue = ""
+        kindValue.stringValue = "—"
+        sizeValue.stringValue = "—"
+        modifiedValue.stringValue = "—"
+        pathValue.stringValue = "—"
+        pathValue.toolTip = nil
+    }
+
+    private func apply(_ details: FilePreviewDetails) {
+        titleLabel.stringValue = details.name
+        titleLabel.toolTip = details.name
+        kindValue.stringValue = details.kind
+        sizeValue.stringValue = details.size
+        modifiedValue.stringValue = details.modified
+        pathValue.stringValue = details.path
+        pathValue.toolTip = details.path
+    }
+
+    private func detailLabel(_ text: String) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = .systemFont(ofSize: 10.5)
+        field.textColor = .secondaryLabelColor
+        return field
     }
 }

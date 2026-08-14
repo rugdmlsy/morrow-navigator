@@ -1083,12 +1083,13 @@ final class MainWindowController: NSWindowController {
             clearPreview()
             return
         }
+        let details = previewDetails(for: item)
 
         if RemoteLocation(url: item.url) == nil {
             previewRequestID = nil
             removePreviewTemporaryDirectory()
             previewPane.isHidden = false
-            previewPane.showPreview(url: item.url, title: item.name, detail: previewDetail(for: item))
+            previewPane.showPreview(url: item.url, details: details)
             return
         }
 
@@ -1101,8 +1102,7 @@ final class MainWindowController: NSWindowController {
             removePreviewTemporaryDirectory()
             previewPane.isHidden = false
             previewPane.showMessage(
-                title: item.name,
-                detail: previewDetail(for: item),
+                details: details,
                 message: "Remote preview is limited to \(ByteCountFormatter.string(fromByteCount: Int64(remotePreviewByteLimit), countStyle: .file))."
             )
             return
@@ -1112,7 +1112,7 @@ final class MainWindowController: NSWindowController {
         previewRequestID = requestID
         removePreviewTemporaryDirectory()
         previewPane.isHidden = false
-        previewPane.showLoading(title: item.name, detail: remote.displayPath)
+        previewPane.showLoading(details: details)
         let service = remoteFileSystem
         let maxBytes = remotePreviewByteLimit
         let filename = item.name
@@ -1134,28 +1134,27 @@ final class MainWindowController: NSWindowController {
                     return
                 }
                 self.previewTemporaryDirectory = directory
-                self.previewPane.showPreview(url: fileURL, title: item.name, detail: remote.displayPath)
+                self.previewPane.showPreview(url: fileURL, details: details)
             } catch {
                 guard let self, self.previewRequestID == requestID else { return }
                 self.removePreviewTemporaryDirectory()
                 self.previewPane.showMessage(
-                    title: item.name,
-                    detail: remote.displayPath,
+                    details: details,
                     message: error.localizedDescription
                 )
             }
         }
     }
 
-    private func previewDetail(for item: FileInfo) -> String {
-        var parts: [String] = []
-        if let size = item.size {
-            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
-        }
-        if let modifiedAt = item.modifiedAt {
-            parts.append(dateFormatter.string(from: modifiedAt))
-        }
-        return parts.isEmpty ? kindText(for: item) : parts.joined(separator: " · ")
+    private func previewDetails(for item: FileInfo) -> FilePreviewDetails {
+        let path = RemoteLocation(url: item.url)?.displayPath ?? item.url.path
+        return FilePreviewDetails(
+            name: item.name,
+            kind: kindText(for: item),
+            size: item.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "—",
+            modified: item.modifiedAt.map(dateFormatter.string(from:)) ?? "—",
+            path: path
+        )
     }
 
     private func clearPreview() {
