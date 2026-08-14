@@ -159,6 +159,7 @@ final class MainWindowController: NSWindowController {
     private var commandOutputPopover: NSPopover?
     private let backButton = NSButton()
     private let forwardButton = NSButton()
+    private let upButton = NSButton()
     private let browserRevealButton = NSButton()
     private let workspaceParentButton = NSButton()
     private let workspaceCurrentButton = NSButton()
@@ -437,7 +438,14 @@ final class MainWindowController: NSWindowController {
         forwardButton.isBordered = false
         forwardButton.toolTip = "Forward"
 
-        let navigationStack = NSStackView(views: [backButton, forwardButton])
+        upButton.image = NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Up One Level")
+        upButton.target = self
+        upButton.action = #selector(goUpOneLevel)
+        upButton.bezelStyle = .inline
+        upButton.isBordered = false
+        upButton.toolTip = "Up One Level"
+
+        let navigationStack = NSStackView(views: [backButton, forwardButton, upButton])
         navigationStack.translatesAutoresizingMaskIntoConstraints = false
         navigationStack.orientation = .horizontal
         navigationStack.spacing = 7
@@ -964,6 +972,27 @@ final class MainWindowController: NSWindowController {
     private func updateNavigationButtons() {
         backButton.isEnabled = historyIndex > 0
         forwardButton.isEnabled = historyIndex >= 0 && historyIndex < history.count - 1
+        upButton.isEnabled = browserParentDestination() != nil
+    }
+
+    private func browserParentDestination() -> URL? {
+        guard let currentDirectory else { return nil }
+
+        if let currentRemote = RemoteLocation(url: currentDirectory) {
+            if let remoteRoot = remoteRootNode?.location,
+               remoteRoot.host == currentRemote.host,
+               isRemoteDescendant(currentRemote, of: remoteRoot) {
+                guard currentRemote != remoteRoot else { return nil }
+                return currentRemote.parent.url
+            }
+            guard currentRemote.path != "/" else { return nil }
+            return currentRemote.parent.url
+        }
+
+        guard let localRoot = rootNode?.info.url.standardizedFileURL else { return nil }
+        let current = currentDirectory.standardizedFileURL
+        guard current != localRoot, fileSystem.isDescendant(current, of: localRoot) else { return nil }
+        return current.deletingLastPathComponent().standardizedFileURL
     }
 
     private func updateWorkspaceButtons() {
@@ -1146,6 +1175,7 @@ final class MainWindowController: NSWindowController {
                 "cwd=\(directory)",
                 "items=\(tableItems.count)",
                 "outline_rows=\(outlineView.numberOfRows)",
+                "up_enabled=\(upButton.isEnabled)",
                 "selection=\(selected.joined(separator: ","))",
                 "window_width=\(Int(window?.frame.width ?? 0))",
                 "sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))",
@@ -1294,6 +1324,11 @@ final class MainWindowController: NSWindowController {
         guard historyIndex >= 0, historyIndex < history.count - 1 else { return }
         historyIndex += 1
         navigate(to: history[historyIndex], recordHistory: false)
+    }
+
+    @objc private func goUpOneLevel() {
+        guard let parent = browserParentDestination() else { return }
+        navigate(to: parent, recordHistory: true)
     }
 
     @objc func revealSelectedInFinder() {
