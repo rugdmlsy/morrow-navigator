@@ -163,6 +163,10 @@ final class MainWindowController: NSWindowController {
     private let browserRevealButton = NSButton()
     private let workspaceParentButton = NSButton()
     private let workspaceCurrentButton = NSButton()
+    private let previewPane = FilePreviewPane()
+    private var previewRequestID: UUID?
+    private var previewTemporaryDirectory: URL?
+    private let remotePreviewByteLimit = 8 * 1024 * 1024
 
     private lazy var dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -500,6 +504,24 @@ final class MainWindowController: NSWindowController {
         tableScroll.hasHorizontalScroller = false
         tableScroll.autohidesScrollers = true
         tableScroll.borderType = .noBorder
+        tableScroll.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        previewPane.isHidden = true
+        previewPane.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let browserContentStack = NSStackView(views: [tableScroll, previewPane])
+        browserContentStack.translatesAutoresizingMaskIntoConstraints = false
+        browserContentStack.orientation = .horizontal
+        browserContentStack.alignment = .centerY
+        browserContentStack.spacing = 0
+        browserContentStack.distribution = .fill
+        let previewWidth = previewPane.widthAnchor.constraint(equalToConstant: 320)
+        previewWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            previewWidth,
+            previewPane.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            tableScroll.heightAnchor.constraint(equalTo: browserContentStack.heightAnchor),
+            previewPane.heightAnchor.constraint(equalTo: browserContentStack.heightAnchor)
+        ])
 
         let commandSeparator = NSBox()
         commandSeparator.translatesAutoresizingMaskIntoConstraints = false
@@ -576,7 +598,7 @@ final class MainWindowController: NSWindowController {
         container.addSubview(pathControl)
         container.addSubview(actionStack)
         container.addSubview(headerSeparator)
-        container.addSubview(tableScroll)
+        container.addSubview(browserContentStack)
         container.addSubview(commandSeparator)
         container.addSubview(commandOutputHitArea)
         container.addSubview(commandInputBackground)
@@ -599,10 +621,10 @@ final class MainWindowController: NSWindowController {
             headerSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             headerSeparator.topAnchor.constraint(equalTo: navigationStack.bottomAnchor, constant: 8),
 
-            tableScroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            tableScroll.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            tableScroll.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
-            tableScroll.bottomAnchor.constraint(equalTo: commandSeparator.topAnchor),
+            browserContentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            browserContentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            browserContentStack.topAnchor.constraint(equalTo: headerSeparator.bottomAnchor),
+            browserContentStack.bottomAnchor.constraint(equalTo: commandSeparator.topAnchor),
 
             commandSeparator.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             commandSeparator.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -1047,6 +1069,108 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    private func updatePreviewForSelection() {
+        let selectedRows = tableView.selectedRowIndexes
+        guard selectedRows.count == 1,
+              let row = selectedRows.first,
+              tableItems.indices.contains(row) else {
+            clearPreview()
+            return
+        }
+
+        let item = tableItems[row]
+        guard !item.isDirectory else {
+            clearPreview()
+            return
+        }
+
+        if RemoteLocation(url: item.url) == nil {
+            previewRequestID = nil
+            removePreviewTemporaryDirectory()
+            previewPane.isHidden = false
+            previewPane.showPreview(url: item.url, title: item.name, detail: previewDetail(for: item))
+            return
+        }
+
+        guard let remote = RemoteLocation(url: item.url) else {
+            clearPreview()
+            return
+        }
+        if let size = item.size, size > Int64(remotePreviewByteLimit) {
+            previewRequestID = nil
+            removePreviewTemporaryDirectory()
+            previewPane.isHidden = false
+            previewPane.showMessage(
+                title: item.name,
+                detail: previewDetail(for: item),
+                message: "Remote preview is limited to \(ByteCountFormatter.string(fromByteCount: Int64(remotePreviewByteLimit), countStyle: .file))."
+            )
+            return
+        }
+
+        let requestID = UUID()
+        previewRequestID = requestID
+        removePreviewTemporaryDirectory()
+        previewPane.isHidden = false
+        previewPane.showLoading(title: item.name, detail: remote.displayPath)
+        let service = remoteFileSystem
+        let maxBytes = remotePreviewByteLimit
+        let filename = item.name
+
+        Task { [weak self] in
+            do {
+                let data = try await Task.detached(priority: .userInitiated) {
+                    try service.fileContents(of: remote, maxBytes: maxBytes)
+                }.value
+                guard let self, self.previewRequestID == requestID else { return }
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("morrow-navigator-preview-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let safeName = filename.replacingOccurrences(of: "/", with: "_")
+                let fileURL = directory.appendingPathComponent(safeName.isEmpty ? "preview" : safeName)
+                try data.write(to: fileURL, options: .atomic)
+                guard self.previewRequestID == requestID else {
+                    try? FileManager.default.removeItem(at: directory)
+                    return
+                }
+                self.previewTemporaryDirectory = directory
+                self.previewPane.showPreview(url: fileURL, title: item.name, detail: remote.displayPath)
+            } catch {
+                guard let self, self.previewRequestID == requestID else { return }
+                self.removePreviewTemporaryDirectory()
+                self.previewPane.showMessage(
+                    title: item.name,
+                    detail: remote.displayPath,
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func previewDetail(for item: FileInfo) -> String {
+        var parts: [String] = []
+        if let size = item.size {
+            parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+        }
+        if let modifiedAt = item.modifiedAt {
+            parts.append(dateFormatter.string(from: modifiedAt))
+        }
+        return parts.isEmpty ? kindText(for: item) : parts.joined(separator: " · ")
+    }
+
+    private func clearPreview() {
+        previewRequestID = nil
+        previewPane.clear()
+        previewPane.isHidden = true
+        removePreviewTemporaryDirectory()
+    }
+
+    private func removePreviewTemporaryDirectory() {
+        guard let previewTemporaryDirectory else { return }
+        try? FileManager.default.removeItem(at: previewTemporaryDirectory)
+        self.previewTemporaryDirectory = nil
+    }
+
     private func updateStatus() {
         let selected = tableView.selectedRowIndexes.compactMap { index in
             tableItems.indices.contains(index) ? tableItems[index] : nil
@@ -1203,6 +1327,7 @@ final class MainWindowController: NSWindowController {
                 "outline_rows=\(outlineView.numberOfRows)",
                 "up_enabled=\(upButton.isEnabled)",
                 "selection=\(selected.joined(separator: ","))",
+                "preview_visible=\(!previewPane.isHidden)",
                 "window_width=\(Int(window?.frame.width ?? 0))",
                 "sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))",
                 "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))",
@@ -1745,6 +1870,7 @@ extension MainWindowController: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         updateStatus()
+        updatePreviewForSelection()
     }
 
     private func makeIconTextCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {

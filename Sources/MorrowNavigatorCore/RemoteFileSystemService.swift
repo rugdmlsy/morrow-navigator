@@ -325,6 +325,7 @@ public enum RemoteFileSystemError: LocalizedError, Sendable {
     case invalidLocation
     case sshUnavailable
     case githubCLIUnavailable
+    case fileTooLarge(maxBytes: Int)
     case commandFailed(host: String, message: String)
     case invalidResponse(host: String)
 
@@ -336,6 +337,8 @@ public enum RemoteFileSystemError: LocalizedError, Sendable {
             return "The system SSH client is unavailable."
         case .githubCLIUnavailable:
             return "GitHub CLI is unavailable. Install gh and run gh auth login."
+        case .fileTooLarge(let maxBytes):
+            return "Remote file is too large to preview (limit: \(ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .file)))."
         case .commandFailed(let host, let message):
             return message.isEmpty ? "Unable to connect to \(host)." : "\(host): \(message)"
         case .invalidResponse(let host):
@@ -359,6 +362,11 @@ public struct RemoteFileSystemService: Sendable {
         let path: String
         let type: String
         let size: Int64?
+    }
+
+    private struct RemoteFilePayload: Decodable {
+        let data: String
+        let tooLarge: Bool
     }
 
     private static let homeScript = #"""
@@ -388,6 +396,18 @@ with os.scandir(path) as entries:
 print(json.dumps(items, ensure_ascii=False))
 """#
 
+    private static let fileScript = #"""
+import base64, json, sys
+path = base64.b64decode(sys.argv[1]).decode("utf-8")
+limit = int(sys.argv[2])
+with open(path, "rb") as handle:
+    data = handle.read(limit + 1)
+too_large = len(data) > limit
+if too_large:
+    data = data[:limit]
+print(json.dumps({"data": base64.b64encode(data).decode("ascii"), "tooLarge": too_large}))
+"""#
+
     private let sshPath: String
     private let ghPath: String?
 
@@ -403,6 +423,32 @@ print(json.dumps(items, ensure_ascii=False))
             throw RemoteFileSystemError.invalidResponse(host: host)
         }
         return RemoteLocation(host: host, path: payload.path)
+    }
+
+    public func fileContents(of location: RemoteLocation, maxBytes: Int = 8 * 1024 * 1024) throws -> Data {
+        guard maxBytes > 0 else { return Data() }
+        if isGitHubHost(location.host) {
+            let endpoint = try githubFileContentsEndpoint(for: location)
+            let data = try runGitHub(
+                host: location.host,
+                arguments: ["api", "-H", "Accept: application/vnd.github.raw+json", endpoint]
+            )
+            guard data.count <= maxBytes else {
+                throw RemoteFileSystemError.fileTooLarge(maxBytes: maxBytes)
+            }
+            return data
+        }
+
+        let pathData = Data(location.path.utf8).base64EncodedString()
+        let data = try runPython(host: location.host, script: Self.fileScript, arguments: [pathData, String(maxBytes)])
+        guard let payload = try? JSONDecoder().decode(RemoteFilePayload.self, from: data),
+              let decoded = Data(base64Encoded: payload.data) else {
+            throw RemoteFileSystemError.invalidResponse(host: location.host)
+        }
+        guard !payload.tooLarge else {
+            throw RemoteFileSystemError.fileTooLarge(maxBytes: maxBytes)
+        }
+        return decoded
     }
 
     public func children(of location: RemoteLocation, includeHidden: Bool = false) throws -> [FileInfo] {
@@ -573,6 +619,33 @@ print(json.dumps(items, ensure_ascii=False))
             }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
+    }
+
+    private func githubFileContentsEndpoint(for location: RemoteLocation) throws -> String {
+        let components = location.path
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        let owner: String
+        let repository: String
+        let fileComponents: ArraySlice<String>
+        if let ownerScope = githubOwnerScope(for: location.host) {
+            guard components.count >= 2 else { throw RemoteFileSystemError.invalidLocation }
+            owner = ownerScope
+            repository = components[0]
+            fileComponents = components.dropFirst()
+        } else {
+            guard components.count >= 3 else { throw RemoteFileSystemError.invalidLocation }
+            owner = components[0]
+            repository = components[1]
+            fileComponents = components.dropFirst(2)
+        }
+
+        let encodedPath = fileComponents
+            .map(encodeGitHubPathComponent)
+            .joined(separator: "/")
+        guard !encodedPath.isEmpty else { throw RemoteFileSystemError.invalidLocation }
+        return "/repos/\(encodeGitHubPathComponent(owner))/\(encodeGitHubPathComponent(repository))/contents/\(encodedPath)"
     }
 
     private func githubOwnerScope(for host: String) -> String? {

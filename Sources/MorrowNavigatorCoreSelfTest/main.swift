@@ -157,7 +157,12 @@ func run() throws {
         let remoteItems = try RemoteFileSystemService().children(of: RemoteLocation(host: sshHost, path: "/"))
         try expect(!remoteItems.isEmpty, "remote root listing was unexpectedly empty for \(sshHost)")
         try expect(remoteItems.allSatisfy { RemoteLocation(url: $0.url)?.host == sshHost }, "remote listing returned invalid URLs")
-        print("Remote SSH integration: PASS (\(sshHost), \(remoteItems.count) root items)")
+        let remotePreviewData = try RemoteFileSystemService().fileContents(
+            of: RemoteLocation(host: sshHost, path: "/etc/hostname"),
+            maxBytes: 64 * 1024
+        )
+        try expect(!remotePreviewData.isEmpty, "remote file preview read returned empty data for \(sshHost)")
+        print("Remote SSH integration: PASS (\(sshHost), \(remoteItems.count) root items, preview read \(remotePreviewData.count) bytes)")
     }
 
     if let githubHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_HOST"], !githubHost.isEmpty {
@@ -190,7 +195,14 @@ func run() throws {
             of: RemoteLocation(host: githubHost, path: repositoryPath)
         )
         try expect(!repositoryItems.isEmpty, "GitHub repository \(repository) root was unexpectedly empty")
-        print("GitHub integration: PASS (\(githubHost), \(repository), \(repositoryItems.count) root items)")
+        if let previewFile = repositoryItems.first(where: { !$0.isDirectory }),
+           let previewLocation = RemoteLocation(url: previewFile.url) {
+            let previewData = try githubService.fileContents(of: previewLocation, maxBytes: 2 * 1024 * 1024)
+            try expect(!previewData.isEmpty, "GitHub file preview read returned empty data for \(previewFile.name)")
+        } else {
+            throw SelfTestFailure(description: "GitHub repository had no root file available for preview integration test")
+        }
+        print("GitHub integration: PASS (\(githubHost), \(repository), \(repositoryItems.count) root items, preview read PASS)")
     }
 }
 
