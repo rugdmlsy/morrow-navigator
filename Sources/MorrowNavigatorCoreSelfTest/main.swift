@@ -39,16 +39,44 @@ func run() throws {
     try expect(!service.isDescendant(URL(fileURLWithPath: "/tmp/work-old"), of: descendantRoot), "sibling prefix accepted as descendant")
 
     let sshConfig = root.appendingPathComponent("ssh-config")
+    let includedSSHConfig = root.appendingPathComponent("ssh-config-extra")
     try """
+    Host included-host
+        HostName 127.0.0.1
+        User tester
+        Port 2222
+    """.write(to: includedSSHConfig, atomically: true, encoding: .utf8)
+    try """
+    Include \(includedSSHConfig.path)
     Host beta
         HostName beta.example.com
     Host *.internal
         User ignored
     Host alpha beta
         HostName shared.example.com
+    Host github-lab
+        HostName github.com
+        User git
+        IdentityFile ~/.ssh/github_lab_ed25519
     """.write(to: sshConfig, atomically: true, encoding: .utf8)
-    let remoteHosts = SSHConfigDiscovery().hosts(configURL: sshConfig)
-    try expect(remoteHosts.map(\.alias) == ["alpha", "beta"], "SSH host discovery failed: \(remoteHosts)")
+    let sshConfigDiscovery = SSHConfigDiscovery()
+    let remoteHosts = sshConfigDiscovery.hosts(configURL: sshConfig)
+    try expect(remoteHosts.map(\.alias) == ["alpha", "beta", "github-lab", "included-host"], "SSH host discovery failed: \(remoteHosts)")
+    try expect(remoteHosts.first(where: { $0.alias == "beta" })?.hostname == "beta.example.com", "SSH hostname metadata was not parsed")
+    try expect(remoteHosts.first(where: { $0.alias == "github-lab" })?.kind == .github, "GitHub SSH host was not classified")
+    try expect(remoteHosts.first(where: { $0.alias == "github-lab" })?.endpointDescription == "git@github.com", "remote endpoint description was incorrect")
+    try expect(remoteHosts.first(where: { $0.alias == "included-host" })?.endpointDescription == "tester@127.0.0.1:2222", "SSH Include metadata was not parsed")
+
+    try sshConfigDiscovery.appendHost(
+        .init(alias: "gamma", hostname: "10.0.0.8", user: "dev", port: 2202, identityFile: "~/.ssh/gamma_ed25519"),
+        configURL: sshConfig
+    )
+    let updatedRemoteHosts = sshConfigDiscovery.hosts(configURL: sshConfig)
+    let gamma = updatedRemoteHosts.first(where: { $0.alias == "gamma" })
+    try expect(gamma?.kind == .ssh, "new SSH host kind was incorrect")
+    try expect(gamma?.endpointDescription == "dev@10.0.0.8:2202", "new SSH host endpoint was incorrect")
+    let updatedSSHConfig = try String(contentsOf: sshConfig, encoding: .utf8)
+    try expect(updatedSSHConfig.contains("Host gamma\n    HostName 10.0.0.8\n    User dev\n    Port 2202"), "new SSH host block was not written correctly")
 
     let remoteRoot = RemoteLocation(host: "alpha", path: "/")
     let remoteChild = remoteRoot.appending("var").appending("log")

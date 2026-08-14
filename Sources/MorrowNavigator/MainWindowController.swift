@@ -302,9 +302,7 @@ final class MainWindowController: NSWindowController {
 
         let addRemoteButton = symbolButton("plus", action: #selector(addRemoteHost))
         addRemoteButton.toolTip = "Add Remote Connection…"
-        let reloadRemotesButton = symbolButton("square.and.arrow.down", action: #selector(reloadRemoteHosts))
-        reloadRemotesButton.toolTip = "Import Hosts from ~/.ssh/config"
-        let remoteButtonStack = NSStackView(views: [addRemoteButton, reloadRemotesButton])
+        let remoteButtonStack = NSStackView(views: [addRemoteButton])
         remoteButtonStack.translatesAutoresizingMaskIntoConstraints = false
         remoteButtonStack.orientation = .horizontal
         remoteButtonStack.spacing = 2
@@ -371,17 +369,25 @@ final class MainWindowController: NSWindowController {
             let button = NSButton(title: host.alias, target: self, action: #selector(openRemoteHost(_:)))
             button.translatesAutoresizingMaskIntoConstraints = false
             button.identifier = NSUserInterfaceItemIdentifier(host.alias)
-            button.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "Remote Server")
+            let symbol = host.kind == .github ? "chevron.left.forwardslash.chevron.right" : "server.rack"
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: host.kind.displayName)
             button.imagePosition = .imageLeading
             button.alignment = .left
             button.bezelStyle = .inline
             button.isBordered = false
-            button.toolTip = "Connect to \(host.alias)"
+            button.toolTip = "\(host.kind.displayName) · \(host.endpointDescription)"
+
+            let kindBadge = NSTextField(labelWithString: host.kind == .github ? "GITHUB" : "SSH")
+            kindBadge.font = .systemFont(ofSize: 8.5, weight: .semibold)
+            kindBadge.textColor = .tertiaryLabelColor
+            kindBadge.alignment = .right
+            kindBadge.setContentHuggingPriority(.required, for: .horizontal)
+
             let removeButton = NSButton()
             configureSymbolButton(removeButton, symbol: "minus.circle", action: #selector(removeRemoteHost(_:)))
             removeButton.identifier = NSUserInterfaceItemIdentifier(host.alias)
             removeButton.toolTip = "Remove \(host.alias) from Navigator"
-            let row = NSStackView(views: [button, removeButton])
+            let row = NSStackView(views: [button, kindBadge, removeButton])
             row.translatesAutoresizingMaskIntoConstraints = false
             row.orientation = .horizontal
             row.spacing = 2
@@ -396,12 +402,13 @@ final class MainWindowController: NSWindowController {
 
     private func loadManagedRemoteHosts() -> [RemoteHost] {
         let defaults = UserDefaults.standard
+        let discovered = sshConfigDiscovery.hosts()
+        let discoveredByAlias = Dictionary(uniqueKeysWithValues: discovered.map { ($0.alias, $0) })
         if let aliases = defaults.stringArray(forKey: remoteHostAliasesDefaultsKey) {
-            return aliases.map(RemoteHost.init(alias:)).sorted {
+            return aliases.map { discoveredByAlias[$0] ?? RemoteHost(alias: $0) }.sorted {
                 $0.alias.localizedStandardCompare($1.alias) == .orderedAscending
             }
         }
-        let discovered = sshConfigDiscovery.hosts()
         defaults.set(discovered.map(\.alias), forKey: remoteHostAliasesDefaultsKey)
         return discovered
     }
@@ -410,11 +417,9 @@ final class MainWindowController: NSWindowController {
         UserDefaults.standard.set(remoteHosts.map(\.alias), forKey: remoteHostAliasesDefaultsKey)
     }
 
-    private func addManagedRemoteHost(alias: String) {
-        let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace) else { return }
-        guard !remoteHosts.contains(where: { $0.alias == trimmed }) else { return }
-        remoteHosts.append(RemoteHost(alias: trimmed))
+    private func addManagedRemoteHost(_ host: RemoteHost) {
+        guard !remoteHosts.contains(where: { $0.alias == host.alias }) else { return }
+        remoteHosts.append(host)
         remoteHosts.sort { $0.alias.localizedStandardCompare($1.alias) == .orderedAscending }
         persistRemoteHosts()
         rebuildRemoteHostButtons()
@@ -1399,18 +1404,69 @@ final class MainWindowController: NSWindowController {
 
     @objc private func addRemoteHost() {
         guard let window else { return }
+        let existingAliases = Set(remoteHosts.map(\.alias))
+        let availableHosts = sshConfigDiscovery.hosts().filter { !existingAliases.contains($0.alias) }
+        let picker = RemoteConnectionPickerView(hosts: availableHosts)
+
         let alert = NSAlert()
         alert.messageText = "Add Remote Connection"
-        alert.informativeText = "Enter an SSH alias from ~/.ssh/config, a hostname, or an IP address."
+        alert.informativeText = "Choose a connection already configured in OpenSSH, or create a new SSH entry. GitHub aliases are detected from HostName automatically."
+        let addButton = alert.addButton(withTitle: "Add Selected")
+        addButton.isEnabled = !availableHosts.isEmpty
+        alert.addButton(withTitle: "New SSH…")
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = picker
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            if response == .alertFirstButtonReturn {
+                if let host = picker.selectedHost {
+                    self.addManagedRemoteHost(host)
+                }
+            } else if response == .alertSecondButtonReturn {
+                DispatchQueue.main.async { [weak self] in
+                    self?.presentNewSSHConnectionSheet()
+                }
+            }
+        }
+    }
+
+    private func presentNewSSHConnectionSheet() {
+        guard let window else { return }
+        let form = NewSSHConnectionView()
+        let alert = NSAlert()
+        alert.messageText = "New SSH Connection"
+        alert.informativeText = "Navigator will add this connection to ~/.ssh/config and reuse OpenSSH for authentication."
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        field.placeholderString = "example: ovh-vps"
-        alert.accessoryView = field
+        alert.accessoryView = form
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            self?.addManagedRemoteHost(alias: field.stringValue)
+            guard response == .alertFirstButtonReturn, let self else { return }
+            guard let definition = form.definition else {
+                self.presentRemoteConnectionError("Alias and host are required, and Port must be a valid number.")
+                return
+            }
+            do {
+                _ = try self.sshConfigDiscovery.appendHost(definition)
+                let configured = self.sshConfigDiscovery.hosts()
+                guard let host = configured.first(where: { $0.alias == definition.alias }) else {
+                    self.presentRemoteConnectionError("The SSH entry was written, but Navigator could not reload it.")
+                    return
+                }
+                self.addManagedRemoteHost(host)
+            } catch {
+                self.presentRemoteConnectionError(error.localizedDescription)
+            }
         }
+    }
+
+    private func presentRemoteConnectionError(_ message: String) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Unable to Add Remote"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
     }
 
     @objc private func removeRemoteHost(_ sender: NSButton) {
@@ -1420,14 +1476,6 @@ final class MainWindowController: NSWindowController {
         rebuildRemoteHostButtons()
     }
 
-    @objc private func reloadRemoteHosts() {
-        for host in sshConfigDiscovery.hosts() where !remoteHosts.contains(host) {
-            remoteHosts.append(host)
-        }
-        remoteHosts.sort { $0.alias.localizedStandardCompare($1.alias) == .orderedAscending }
-        persistRemoteHosts()
-        rebuildRemoteHostButtons()
-    }
 }
 
 extension MainWindowController: NSTextFieldDelegate {
