@@ -21,6 +21,8 @@ final class FilePreviewPane: NSView {
     private let sizeValue = NSTextField(labelWithString: "—")
     private let modifiedValue = NSTextField(labelWithString: "—")
     private let pathValue = NSTextField(wrappingLabelWithString: "—")
+    private let copyPathButton = NSButton()
+    private var currentPath: String?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -64,6 +66,27 @@ final class FilePreviewPane: NSView {
         pathValue.textColor = .labelColor
         pathValue.maximumNumberOfLines = 2
         pathValue.lineBreakMode = .byTruncatingMiddle
+        pathValue.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        copyPathButton.translatesAutoresizingMaskIntoConstraints = false
+        copyPathButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Path")
+        copyPathButton.bezelStyle = .inline
+        copyPathButton.isBordered = false
+        copyPathButton.target = self
+        copyPathButton.action = #selector(copyPath)
+        copyPathButton.toolTip = "Copy Path"
+        copyPathButton.isHidden = true
+        copyPathButton.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            copyPathButton.widthAnchor.constraint(equalToConstant: 22),
+            copyPathButton.heightAnchor.constraint(equalToConstant: 22)
+        ])
+
+        let pathRow = NSStackView(views: [pathValue, copyPathButton])
+        pathRow.orientation = .horizontal
+        pathRow.alignment = .centerY
+        pathRow.spacing = 5
+        pathRow.distribution = .fill
 
         let detailsTitle = NSTextField(labelWithString: "DETAILS")
         detailsTitle.font = .systemFont(ofSize: 9.5, weight: .semibold)
@@ -73,7 +96,7 @@ final class FilePreviewPane: NSView {
             [detailLabel("Kind"), kindValue],
             [detailLabel("Size"), sizeValue],
             [detailLabel("Modified"), modifiedValue],
-            [detailLabel("Path"), pathValue]
+            [detailLabel("Path"), pathRow]
         ])
         detailsGrid.translatesAutoresizingMaskIntoConstraints = false
         detailsGrid.rowSpacing = 5
@@ -174,6 +197,8 @@ final class FilePreviewPane: NSView {
         modifiedValue.stringValue = "—"
         pathValue.stringValue = "—"
         pathValue.toolTip = nil
+        currentPath = nil
+        copyPathButton.isHidden = true
     }
 
     private func apply(_ details: FilePreviewDetails) {
@@ -184,6 +209,15 @@ final class FilePreviewPane: NSView {
         modifiedValue.stringValue = details.modified
         pathValue.stringValue = details.path
         pathValue.toolTip = details.path
+        let path = details.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentPath = path.isEmpty || path == "—" ? nil : path
+        copyPathButton.isHidden = currentPath == nil
+    }
+
+    @objc private func copyPath() {
+        guard let currentPath else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(currentPath, forType: .string)
     }
 
     private func detailLabel(_ text: String) -> NSTextField {
