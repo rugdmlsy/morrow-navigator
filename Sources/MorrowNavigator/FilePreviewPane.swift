@@ -82,28 +82,25 @@ final class FilePreviewPane: NSView {
             copyPathButton.heightAnchor.constraint(equalToConstant: 22)
         ])
 
-        let pathRow = NSStackView(views: [pathValue, copyPathButton])
-        pathRow.orientation = .horizontal
-        pathRow.alignment = .centerY
-        pathRow.spacing = 5
-        pathRow.distribution = .fill
-
         let detailsTitle = NSTextField(labelWithString: "DETAILS")
         detailsTitle.font = .systemFont(ofSize: 9.5, weight: .semibold)
         detailsTitle.textColor = .secondaryLabelColor
 
         let detailsGrid = NSGridView(views: [
-            [detailLabel("Kind"), kindValue],
-            [detailLabel("Size"), sizeValue],
-            [detailLabel("Modified"), modifiedValue],
-            [detailLabel("Path"), pathRow]
+            [detailLabel("Kind"), kindValue, NSView()],
+            [detailLabel("Size"), sizeValue, NSView()],
+            [detailLabel("Modified"), modifiedValue, NSView()],
+            [detailLabel("Path"), pathValue, copyPathButton]
         ])
         detailsGrid.translatesAutoresizingMaskIntoConstraints = false
         detailsGrid.rowSpacing = 5
         detailsGrid.columnSpacing = 9
         detailsGrid.column(at: 0).xPlacement = .trailing
         detailsGrid.column(at: 1).xPlacement = .fill
+        detailsGrid.column(at: 2).xPlacement = .trailing
         detailsGrid.column(at: 0).width = 53
+        detailsGrid.column(at: 2).width = 22
+        detailsGrid.row(at: 3).yPlacement = .top
 
         let detailsStack = NSStackView(views: [detailsTitle, detailsGrid])
         detailsStack.translatesAutoresizingMaskIntoConstraints = false
