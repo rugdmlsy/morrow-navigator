@@ -57,12 +57,12 @@ final class FilePreviewPane: NSView {
         detailsSeparator.boxType = .separator
 
         [kindValue, sizeValue, modifiedValue].forEach { field in
-            field.font = .systemFont(ofSize: 10.5)
+            field.font = .systemFont(ofSize: 11.5)
             field.textColor = .labelColor
             field.lineBreakMode = .byTruncatingMiddle
             field.maximumNumberOfLines = 1
         }
-        pathValue.font = .systemFont(ofSize: 10.5)
+        pathValue.font = .systemFont(ofSize: 11.5)
         pathValue.textColor = .labelColor
         pathValue.maximumNumberOfLines = 2
         pathValue.lineBreakMode = .byTruncatingMiddle
@@ -83,7 +83,7 @@ final class FilePreviewPane: NSView {
         ])
 
         let detailsTitle = NSTextField(labelWithString: "DETAILS")
-        detailsTitle.font = .systemFont(ofSize: 9.5, weight: .semibold)
+        detailsTitle.font = .systemFont(ofSize: 10.5, weight: .semibold)
         detailsTitle.textColor = .secondaryLabelColor
 
         let detailsGrid = NSGridView(views: [
@@ -93,7 +93,7 @@ final class FilePreviewPane: NSView {
             [detailLabel("Path"), pathValue, copyPathButton]
         ])
         detailsGrid.translatesAutoresizingMaskIntoConstraints = false
-        detailsGrid.rowSpacing = 5
+        detailsGrid.rowSpacing = 7
         detailsGrid.columnSpacing = 9
         detailsGrid.column(at: 0).xPlacement = .trailing
         detailsGrid.column(at: 1).xPlacement = .fill
@@ -106,7 +106,7 @@ final class FilePreviewPane: NSView {
         detailsStack.translatesAutoresizingMaskIntoConstraints = false
         detailsStack.orientation = .vertical
         detailsStack.alignment = .leading
-        detailsStack.spacing = 7
+        detailsStack.spacing = 8
 
         addSubview(sideSeparator)
         addSubview(titleLabel)
@@ -219,7 +219,7 @@ final class FilePreviewPane: NSView {
 
     private func detailLabel(_ text: String) -> NSTextField {
         let field = NSTextField(labelWithString: text)
-        field.font = .systemFont(ofSize: 10.5)
+        field.font = .systemFont(ofSize: 11.5)
         field.textColor = .secondaryLabelColor
         return field
     }
