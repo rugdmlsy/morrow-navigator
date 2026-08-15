@@ -9,6 +9,44 @@ struct FilePreviewDetails {
     let path: String
 }
 
+private final class HoverIconButton: NSButton {
+    private var isHovered = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isHovered {
+            NSColor.labelColor.withAlphaComponent(0.09).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5).fill()
+        }
+        super.draw(dirtyRect)
+    }
+}
+
 @MainActor
 final class FilePreviewPane: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
@@ -21,8 +59,9 @@ final class FilePreviewPane: NSView {
     private let sizeValue = NSTextField(labelWithString: "—")
     private let modifiedValue = NSTextField(labelWithString: "—")
     private let pathValue = NSTextField(wrappingLabelWithString: "—")
-    private let copyPathButton = NSButton()
+    private let copyPathButton = HoverIconButton()
     private var currentPath: String?
+    private var copyConfirmationPopover: NSPopover?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -82,6 +121,14 @@ final class FilePreviewPane: NSView {
             copyPathButton.heightAnchor.constraint(equalToConstant: 22)
         ])
 
+        let copyButtonContainer = NSView()
+        copyButtonContainer.translatesAutoresizingMaskIntoConstraints = false
+        copyButtonContainer.addSubview(copyPathButton)
+        NSLayoutConstraint.activate([
+            copyPathButton.centerXAnchor.constraint(equalTo: copyButtonContainer.centerXAnchor),
+            copyPathButton.centerYAnchor.constraint(equalTo: copyButtonContainer.centerYAnchor)
+        ])
+
         let detailsTitle = NSTextField(labelWithString: "DETAILS")
         detailsTitle.font = .systemFont(ofSize: 10.5, weight: .semibold)
         detailsTitle.textColor = .secondaryLabelColor
@@ -90,7 +137,7 @@ final class FilePreviewPane: NSView {
             [detailLabel("Kind"), kindValue, NSView()],
             [detailLabel("Size"), sizeValue, NSView()],
             [detailLabel("Modified"), modifiedValue, NSView()],
-            [detailLabel("Path"), pathValue, copyPathButton]
+            [detailLabel("Path"), pathValue, copyButtonContainer]
         ])
         detailsGrid.translatesAutoresizingMaskIntoConstraints = false
         detailsGrid.rowSpacing = 7
@@ -100,8 +147,10 @@ final class FilePreviewPane: NSView {
         detailsGrid.column(at: 2).xPlacement = .trailing
         detailsGrid.column(at: 0).width = 53
         detailsGrid.column(at: 2).width = 22
-        detailsGrid.row(at: 3).yPlacement = .top
-        detailsGrid.cell(atColumnIndex: 2, rowIndex: 3).yPlacement = .center
+        detailsGrid.row(at: 3).yPlacement = .fill
+        detailsGrid.cell(atColumnIndex: 0, rowIndex: 3).yPlacement = .top
+        detailsGrid.cell(atColumnIndex: 1, rowIndex: 3).yPlacement = .top
+        detailsGrid.cell(atColumnIndex: 2, rowIndex: 3).yPlacement = .fill
 
         let detailsStack = NSStackView(views: [detailsTitle, detailsGrid])
         detailsStack.translatesAutoresizingMaskIntoConstraints = false
@@ -197,6 +246,8 @@ final class FilePreviewPane: NSView {
         pathValue.toolTip = nil
         currentPath = nil
         copyPathButton.isHidden = true
+        copyConfirmationPopover?.close()
+        copyConfirmationPopover = nil
     }
 
     private func apply(_ details: FilePreviewDetails) {
@@ -216,6 +267,42 @@ final class FilePreviewPane: NSView {
         guard let currentPath else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(currentPath, forType: .string)
+        showCopyConfirmation()
+    }
+
+    private func showCopyConfirmation() {
+        copyConfirmationPopover?.close()
+
+        let label = NSTextField(labelWithString: "Copied")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 11.5, weight: .medium)
+        label.textColor = .labelColor
+        label.alignment = .center
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 74, height: 30))
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+
+        let controller = NSViewController()
+        controller.view = container
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 74, height: 30)
+        popover.contentViewController = controller
+        copyConfirmationPopover = popover
+        popover.show(relativeTo: copyPathButton.bounds, of: copyPathButton, preferredEdge: .maxY)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self, weak popover] in
+            guard let self, let popover, self.copyConfirmationPopover === popover else { return }
+            popover.close()
+            self.copyConfirmationPopover = nil
+        }
     }
 
     private func detailLabel(_ text: String) -> NSTextField {
