@@ -101,6 +101,7 @@ final class FilePreviewPane: NSView {
         detailsGrid.column(at: 0).width = 53
         detailsGrid.column(at: 2).width = 22
         detailsGrid.row(at: 3).yPlacement = .top
+        detailsGrid.cell(atColumnIndex: 2, rowIndex: 3).yPlacement = .center
 
         let detailsStack = NSStackView(views: [detailsTitle, detailsGrid])
         detailsStack.translatesAutoresizingMaskIntoConstraints = false
