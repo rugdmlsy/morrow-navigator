@@ -17,17 +17,19 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 - External `morrow-navigator` CLI (`mnavi` short alias) using the same command parser and command engine
 - Live GUI synchronization for CLI mutations
 - Lightweight current-directory watcher for changes made by ordinary shell tools such as `touch`, `mv`, and `rm`
-- Read-only remote directory browsing over SSH plus GitHub repository browsing for SSH aliases that resolve to `github.com`
+- Unified read-only filesystem browsing across local files, SFTP remotes, and GitHub repositories
 - Automatic in-place file preview on single selection, using macOS Quick Look for local files and on-demand temporary fetches for remote files
 - Restore the last workspace on launch
 
 Hidden files remain omitted from the GUI by default; `ls -a` can inspect them from the command interface.
 
-Remote connections appear in the sidebar under **REMOTE** with explicit **SSH**, **GITHUB**, or **GH REPO** badges. **+** opens a connection picker populated from `~/.ssh/config`, showing each unused alias together with its detected type and effective endpoint metadata. It also provides **GitHub Repository…**, which loads repositories accessible to the account authenticated by `gh` and adds a selected `owner/repository` as a direct sidebar shortcut, plus **New SSH…** for creating a normal OpenSSH `Host` block from structured alias/host/user/port/identity-file fields. Navigator never stores passwords or private-key contents; new SSH connections are written to `~/.ssh/config` and authentication remains owned by the system SSH client. The minus button removes only the Navigator shortcut, not the underlying SSH config entry or GitHub repository.
+Remote connections appear in the sidebar under **REMOTE** with explicit **SFTP**, **GITHUB**, or **GH REPO** badges. **+** opens a connection picker populated from `~/.ssh/config`; those OpenSSH entries supply host, user, port, and key settings, while filesystem operations themselves use the SFTP subsystem. It also provides **GitHub Repository…**, which loads repositories accessible to the account authenticated by `gh`, plus **New SFTP…** for creating a normal OpenSSH `Host` block from structured connection fields. Navigator never stores passwords or private-key contents. The minus button removes only the Navigator shortcut, not the underlying SSH config entry or GitHub repository.
 
-Remote directory listings are cached lazily under `~/Library/Caches/MorrowNavigator/RemoteDirectories`. Revisiting a directory renders cached metadata immediately while a background refresh runs; fresh results replace stale cache entries. Ordinary SSH hosts use a short-lived OpenSSH multiplexed connection and require remote `python3` for structured metadata. SSH aliases that resolve to `github.com` are treated as a virtual repository filesystem instead: Navigator uses the authenticated GitHub CLI (`gh`) to browse repositories and repository contents because GitHub SSH intentionally provides Git transport rather than shell access. Aliases named `github-<owner>` are scoped directly to that GitHub owner (for example, `github-reslab-asu` opens the `reslab-asu` repository list); a generic GitHub alias keeps the all-accessible-owners view. GitHub browsing requires `gh auth login`. Remote folders can also be promoted to the main workspace root, and remote browsing remains read-only for now.
+Local, SFTP, and GitHub locations share one `FileSystemLocation` model and one `FileSystemProvider` interface for metadata, child enumeration, and file reads. `UnifiedFileSystemService` routes each operation to `LocalFileSystemProvider`, `SFTPFileSystemProvider`, or `GitHubFileSystemProvider`; the GUI therefore uses one `FileNode` tree and one navigation path instead of separate local/remote implementations. Existing saved `ssh://` Navigator URLs are accepted as legacy input and normalized to `sftp://`.
 
-Selecting exactly one file opens an embedded preview pane on the right side of the browser. Local files are passed directly to macOS Quick Look. Remote GitHub and SSH files are fetched only when selected, written to a temporary preview file, and then rendered by the same Quick Look view; remote previews are capped at 8 MB to avoid accidentally downloading large files. A details section below the preview shows the file kind, size, modified time, and full local or remote path. Directories, multiple selections, and cleared selections collapse the preview pane automatically.
+Non-local directory listings are cached lazily under `~/Library/Caches/MorrowNavigator/FileSystemDirectories`. Revisiting an SFTP or GitHub directory renders cached metadata immediately while a background refresh runs. SFTP browsing uses the system `sftp` client directly and does not execute a remote shell or require remote Python. GitHub remains a virtual filesystem backed by the authenticated GitHub CLI (`gh`), because GitHub SSH provides Git transport rather than general SFTP access. Aliases named `github-<owner>` are scoped directly to that owner; a generic GitHub authority keeps the all-accessible-owners view. GitHub browsing requires `gh auth login`. Non-local browsing is read-only for now.
+
+Selecting exactly one file opens an embedded preview pane on the right side of the browser. Local files are passed directly to macOS Quick Look. SFTP and GitHub files are fetched only when selected, written to a temporary preview file, and rendered by the same Quick Look view; non-local previews are capped at 8 MB. A details section below the preview shows the file kind, size, modified time, and full provider-specific path. Directories, multiple selections, and cleared selections collapse the preview pane automatically.
 
 ## Command model
 
@@ -76,14 +78,19 @@ When Morrow Navigator is running, the CLI sends commands to the app over local p
 ## Architecture
 
 ```text
-                    MorrowNavigatorCore
-             command parser + filesystem engine
-                    /                 \
-             AppKit GUI       morrow-navigator / mnavi
-                 |                       |
-                 +----- local IPC -------+
-                 |
-          directory change watcher
+                         MorrowNavigatorCore
+                FileSystemLocation + FileInfo
+                              |
+                  UnifiedFileSystemService
+                 /            |             \
+              Local          SFTP          GitHub
+           FileManager   system sftp       gh api
+                 \            |             /
+                  +------ one FileNode -----+
+                              |
+                          AppKit GUI
+                              |
+                        local IPC / CLI
 ```
 
 The GUI owns presentation state such as the active workspace, current directory, selection, and navigation history. Filesystem commands are defined once in `MorrowNavigatorCore`; GUI-specific commands are limited to the `ui ...` namespace.
@@ -94,7 +101,8 @@ The GUI owns presentation state such as the active workspace, current directory,
 - AppKit (`NSOutlineView`, `NSTableView`, `NSOpenPanel`, `NSWorkspace`)
 - Foundation distributed notifications + per-user temporary request/response files for lightweight local IPC
 - Dispatch vnode source for current-directory change notification
-- macOS system `ssh` client for remote directory metadata; no bundled SSH credentials
+- macOS system `sftp` client for remote filesystem access; OpenSSH config/credentials remain system-owned
+- GitHub CLI (`gh`) for the GitHub virtual filesystem
 - Swift Package Manager
 - No Electron, WebView, Node.js, or third-party runtime dependencies
 

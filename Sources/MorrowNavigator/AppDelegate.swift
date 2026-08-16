@@ -16,8 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let legacyURL = savedPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
         let candidate = savedWorkspaceURL ?? legacyURL
         let initialURL = candidate.flatMap { url -> URL? in
-            if RemoteLocation(url: url) != nil { return url }
-            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            guard let location = FileSystemLocation(url: url) else { return nil }
+            if location.kind != .local { return location.url }
+            return FileManager.default.fileExists(atPath: location.path) ? location.url : nil
         }
 
         let controller = MainWindowController(initialWorkspace: initialURL)

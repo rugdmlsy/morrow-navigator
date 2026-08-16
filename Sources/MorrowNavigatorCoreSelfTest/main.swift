@@ -73,7 +73,7 @@ func run() throws {
     )
     let updatedRemoteHosts = sshConfigDiscovery.hosts(configURL: sshConfig)
     let gamma = updatedRemoteHosts.first(where: { $0.alias == "gamma" })
-    try expect(gamma?.kind == .ssh, "new SSH host kind was incorrect")
+    try expect(gamma?.kind == .sftp, "new SFTP host kind was incorrect")
     try expect(gamma?.endpointDescription == "dev@10.0.0.8:2202", "new SSH host endpoint was incorrect")
     let updatedSSHConfig = try String(contentsOf: sshConfig, encoding: .utf8)
     try expect(updatedSSHConfig.contains("Host gamma\n    HostName 10.0.0.8\n    User dev\n    Port 2202"), "new SSH host block was not written correctly")
@@ -86,19 +86,22 @@ func run() throws {
         displayName: "reslab-asu/agent-rollback-protocol",
         rootPath: "/reslab-asu/agent-rollback-protocol"
     )
-    try expect(repositoryShortcut.navigationLocation == RemoteLocation(host: "github.com", path: "/reslab-asu/agent-rollback-protocol"), "GitHub repository shortcut navigation path was incorrect")
+    try expect(repositoryShortcut.navigationLocation == FileSystemLocation(kind: .github, authority: "github.com", path: "/reslab-asu/agent-rollback-protocol"), "GitHub repository shortcut navigation path was incorrect")
     try expect(repositoryShortcut.endpointDescription == "github.com/reslab-asu/agent-rollback-protocol", "GitHub repository shortcut endpoint description was incorrect")
     let shortcutData = try JSONEncoder().encode([repositoryShortcut])
     let decodedShortcuts = try JSONDecoder().decode([RemoteHost].self, from: shortcutData)
     try expect(decodedShortcuts == [repositoryShortcut], "GitHub repository shortcut did not persist through Codable")
 
-    let remoteRoot = RemoteLocation(host: "alpha", path: "/")
+    let remoteRoot = FileSystemLocation(kind: .sftp, authority: "alpha", path: "/")
     let remoteChild = remoteRoot.appending("var").appending("log")
     try expect(remoteChild.displayPath == "alpha:/var/log", "remote path append failed: \(remoteChild.displayPath)")
-    try expect(remoteChild.parent == RemoteLocation(host: "alpha", path: "/var"), "remote path parent failed")
-    try expect(RemoteLocation(url: remoteChild.url) == remoteChild, "remote URL round-trip failed: \(remoteChild.url)")
+    try expect(remoteChild.parent == FileSystemLocation(kind: .sftp, authority: "alpha", path: "/var"), "remote path parent failed")
+    try expect(FileSystemLocation(url: remoteChild.url) == remoteChild, "remote URL round-trip failed: \(remoteChild.url)")
+    let legacySSHURL = URL(string: "ssh://alpha/var/log")!
+    try expect(FileSystemLocation(url: legacySSHURL) == remoteChild, "legacy ssh:// URL did not migrate to SFTP")
+    try expect(remoteChild.url.scheme == "sftp", "SFTP location did not emit sftp:// URL")
 
-    let remoteCache = RemoteDirectoryCache(rootDirectory: root.appendingPathComponent("remote-cache", isDirectory: true))
+    let remoteCache = FileSystemDirectoryCache(rootDirectory: root.appendingPathComponent("remote-cache", isDirectory: true))
     let cachedItem = FileInfo(
         url: remoteRoot.appending("etc").url,
         name: "etc",
@@ -153,25 +156,26 @@ func run() throws {
     let resizeSidebar = engine.execute(arguments: ["ui", "sidebar", "333"], baseDirectory: root, workspaceRoot: root)
     try expect(resizeSidebar.effect == .uiSidebarWidth(333), "ui sidebar did not parse width: \(resizeSidebar.effect)")
 
-    if let sshHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_SSH_HOST"], !sshHost.isEmpty {
-        let remoteItems = try RemoteFileSystemService().children(of: RemoteLocation(host: sshHost, path: "/"))
-        try expect(!remoteItems.isEmpty, "remote root listing was unexpectedly empty for \(sshHost)")
-        try expect(remoteItems.allSatisfy { RemoteLocation(url: $0.url)?.host == sshHost }, "remote listing returned invalid URLs")
-        let remotePreviewData = try RemoteFileSystemService().fileContents(
-            of: RemoteLocation(host: sshHost, path: "/etc/hostname"),
+    let sftpHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_SFTP_HOST"]
+        ?? ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_SSH_HOST"]
+    if let sftpHost, !sftpHost.isEmpty {
+        let remoteItems = try UnifiedFileSystemService().children(of: FileSystemLocation(kind: .sftp, authority: sftpHost, path: "/"))
+        try expect(!remoteItems.isEmpty, "remote root listing was unexpectedly empty for \(sftpHost)")
+        try expect(remoteItems.allSatisfy { FileSystemLocation(url: $0.url)?.authority == sftpHost }, "remote listing returned invalid URLs")
+        let remotePreviewData = try UnifiedFileSystemService().fileContents(
+            of: FileSystemLocation(kind: .sftp, authority: sftpHost, path: "/etc/hostname"),
             maxBytes: 64 * 1024
         )
-        try expect(!remotePreviewData.isEmpty, "remote file preview read returned empty data for \(sshHost)")
-        print("Remote SSH integration: PASS (\(sshHost), \(remoteItems.count) root items, preview read \(remotePreviewData.count) bytes)")
+        try expect(!remotePreviewData.isEmpty, "remote file preview read returned empty data for \(sftpHost)")
+        print("Remote SFTP integration: PASS (\(sftpHost), \(remoteItems.count) root items, preview read \(remotePreviewData.count) bytes)")
     }
 
     if let githubHost = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_HOST"], !githubHost.isEmpty {
-        let githubService = RemoteFileSystemService()
-        try expect(githubService.isGitHubHost(githubHost), "GitHub SSH alias was not detected: \(githubHost)")
-        let accessibleRepositories = try githubService.githubRepositories()
+        let githubService = UnifiedFileSystemService()
+                let accessibleRepositories = try githubService.githubRepositories()
         try expect(!accessibleRepositories.isEmpty, "GitHub repository picker source was empty")
         let owner = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_OWNER"]
-        let rootItems = try githubService.children(of: RemoteLocation(host: githubHost, path: "/"))
+        let rootItems = try githubService.children(of: FileSystemLocation(kind: .github, authority: githubHost, path: "/"))
         try expect(!rootItems.isEmpty, "GitHub root did not return items")
         let scopedOwner = githubHost.lowercased().hasPrefix("github-") ? String(githubHost.dropFirst("github-".count)) : nil
         let repositories: [FileInfo]
@@ -180,7 +184,7 @@ func run() throws {
             repositories = rootItems
         } else {
             let selectedOwner = owner ?? rootItems[0].name
-            repositories = try githubService.children(of: RemoteLocation(host: githubHost, path: "/\(selectedOwner)"))
+            repositories = try githubService.children(of: FileSystemLocation(kind: .github, authority: githubHost, path: "/\(selectedOwner)"))
         }
         try expect(!repositories.isEmpty, "GitHub repository list was empty for \(githubHost)")
         let repository = ProcessInfo.processInfo.environment["MORROW_NAVIGATOR_TEST_GITHUB_REPO"] ?? repositories[0].name
@@ -192,11 +196,11 @@ func run() throws {
             ? "/\(owner ?? rootItems[0].name)/\(repository)"
             : "/\(repository)"
         let repositoryItems = try githubService.children(
-            of: RemoteLocation(host: githubHost, path: repositoryPath)
+            of: FileSystemLocation(kind: .github, authority: githubHost, path: repositoryPath)
         )
         try expect(!repositoryItems.isEmpty, "GitHub repository \(repository) root was unexpectedly empty")
         if let previewFile = repositoryItems.first(where: { !$0.isDirectory }),
-           let previewLocation = RemoteLocation(url: previewFile.url) {
+           let previewLocation = FileSystemLocation(url: previewFile.url) {
             let previewData = try githubService.fileContents(of: previewLocation, maxBytes: 2 * 1024 * 1024)
             try expect(!previewData.isEmpty, "GitHub file preview read returned empty data for \(previewFile.name)")
         } else {

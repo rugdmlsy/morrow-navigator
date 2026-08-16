@@ -95,9 +95,7 @@ private final class InstantOutlineView: NSOutlineView {
 
         if clickedRow >= 0 {
             let clickedItem = item(atRow: clickedRow)
-            let isDirectory = (clickedItem as? FileNode)?.info.isNavigableDirectory
-                ?? (clickedItem as? RemoteFileNode)?.info.isNavigableDirectory
-                ?? false
+            let isDirectory = (clickedItem as? FileNode)?.info.isNavigableDirectory ?? false
             if isDirectory {
                 // The whole row is the interaction target. The disclosure triangle is
                 // presentation only and never receives separate click behavior.
@@ -125,16 +123,14 @@ private final class InstantOutlineView: NSOutlineView {
 
 @MainActor
 final class MainWindowController: NSWindowController {
-    private let fileSystem = FileSystemService()
-    private let remoteFileSystem = RemoteFileSystemService()
-    private let remoteDirectoryCache = RemoteDirectoryCache()
+    private let fileSystem = UnifiedFileSystemService()
+    private let directoryCache = FileSystemDirectoryCache()
     private let sshConfigDiscovery = SSHConfigDiscovery()
     private let commandEngine = NavigatorCommandEngine()
     private let directoryWatcher = DirectoryWatcher()
     private let iconCache = NSCache<NSString, NSImage>()
 
     private var rootNode: FileNode?
-    private var remoteRootNode: RemoteFileNode?
     private var currentDirectory: URL?
     private var tableItems: [FileInfo] = []
     private var history: [URL] = []
@@ -381,7 +377,7 @@ final class MainWindowController: NSWindowController {
             button.isBordered = false
             button.toolTip = "\(host.kind.displayName) · \(host.endpointDescription)"
 
-            let badge = host.kind == .github && host.rootPath != "/" ? "GH REPO" : (host.kind == .github ? "GITHUB" : "SSH")
+            let badge = host.kind == .github && host.rootPath != "/" ? "GH REPO" : (host.kind == .github ? "GITHUB" : "SFTP")
             let kindBadge = NSTextField(labelWithString: badge)
             kindBadge.font = .systemFont(ofSize: 8.5, weight: .semibold)
             kindBadge.textColor = .tertiaryLabelColor
@@ -733,48 +729,31 @@ final class MainWindowController: NSWindowController {
     }
 
     func setWorkspace(_ url: URL) {
-        if let remote = RemoteLocation(url: url) {
-            setRemoteWorkspace(remote)
-            return
+        guard let location = FileSystemLocation(url: url) else { return }
+
+        let info: FileInfo
+        if location.kind == .local {
+            guard let localInfo = try? fileSystem.info(at: location), localInfo.isNavigableDirectory else { return }
+            info = localInfo
+        } else {
+            info = FileInfo(
+                url: location.url,
+                name: location.name,
+                isDirectory: true,
+                isPackage: false,
+                size: nil,
+                modifiedAt: nil,
+                isHidden: false
+            )
         }
 
-        let standardized = url.standardizedFileURL
-        guard let info = try? fileSystem.info(for: standardized), info.isNavigableDirectory else {
-            return
-        }
-
-        remoteRootNode = nil
-        let root = FileNode(info: info, fileSystem: fileSystem)
+        let root = FileNode(info: info, fileSystem: fileSystem, cache: directoryCache)
         rootNode = root
         workspaceLabel.stringValue = info.name.uppercased()
-        workspaceLabel.toolTip = standardized.path
-        UserDefaults.standard.set(standardized.path, forKey: "lastWorkspacePath")
-        UserDefaults.standard.set(standardized.absoluteString, forKey: "lastWorkspaceURL")
-
-        history.removeAll(keepingCapacity: true)
-        historyIndex = -1
-        outlineView.reloadData()
-        navigate(to: standardized, recordHistory: true, revealInSidebar: false)
-        updateWorkspaceButtons()
-    }
-
-    private func setRemoteWorkspace(_ location: RemoteLocation) {
-        rootNode = nil
-        let name = location.path == "/"
-            ? location.host
-            : (location.path as NSString).lastPathComponent
-        let info = FileInfo(
-            url: location.url,
-            name: name,
-            isDirectory: true,
-            isPackage: false,
-            size: nil,
-            modifiedAt: nil,
-            isHidden: false
-        )
-        remoteRootNode = RemoteFileNode(info: info, cache: remoteDirectoryCache)
-        workspaceLabel.stringValue = name.uppercased()
         workspaceLabel.toolTip = location.displayPath
+        if location.kind == .local {
+            UserDefaults.standard.set(location.path, forKey: "lastWorkspacePath")
+        }
         UserDefaults.standard.set(location.url.absoluteString, forKey: "lastWorkspaceURL")
 
         history.removeAll(keepingCapacity: true)
@@ -785,73 +764,64 @@ final class MainWindowController: NSWindowController {
     }
 
     private func navigate(to url: URL, recordHistory: Bool, revealInSidebar: Bool = true) {
-        if let remoteLocation = RemoteLocation(url: url) {
-            navigateRemote(to: remoteLocation, recordHistory: recordHistory, revealInSidebar: revealInSidebar)
+        guard let location = FileSystemLocation(url: url),
+              let rootLocation = rootNode?.location,
+              location.isDescendant(of: rootLocation) else { return }
+
+        if location.kind != .local {
+            navigateExternal(to: location, recordHistory: recordHistory, revealInSidebar: revealInSidebar)
             return
         }
 
         remoteNavigationRequestID = nil
         browserRevealButton.isEnabled = true
-        let standardized = url.standardizedFileURL
-        guard let rootNode, fileSystem.isDescendant(standardized, of: rootNode.info.url) else { return }
-
         do {
-            tableItems = try fileSystem.children(of: standardized)
-            currentDirectory = standardized
-            watchCurrentDirectory(standardized)
-            pathControl.url = standardized
-            pathControl.toolTip = standardized.path
+            tableItems = try fileSystem.children(of: location)
+            currentDirectory = location.url
+            watchCurrentDirectory(location.url)
+            pathControl.url = location.url
+            pathControl.toolTip = location.displayPath
             tableView.reloadData()
             tableView.deselectAll(nil)
             updateStatus()
 
-            if recordHistory {
-                recordNavigationHistory(standardized)
-            }
-
+            if recordHistory { recordNavigationHistory(location.url) }
             updateNavigationButtons()
             updateWorkspaceButtons()
-            if revealInSidebar {
-                selectDirectoryInSidebar(standardized)
-            }
+            if revealInSidebar { selectDirectoryInSidebar(location) }
         } catch {
             tableItems = []
             tableView.reloadData()
-            statusLabel.stringValue = "Unable to read \(standardized.lastPathComponent): \(error.localizedDescription)"
+            statusLabel.stringValue = "Unable to read \(location.name): \(error.localizedDescription)"
         }
     }
 
-    private func navigateRemote(to location: RemoteLocation, recordHistory: Bool, revealInSidebar: Bool) {
+    private func navigateExternal(to location: FileSystemLocation, recordHistory: Bool, revealInSidebar: Bool) {
         let requestID = UUID()
         remoteNavigationRequestID = requestID
-        let isGitHub = remoteFileSystem.isGitHubHost(location.host)
         directoryWatcher.stop()
         browserRevealButton.isEnabled = false
         currentDirectory = location.url
         pathControl.url = location.url
         pathControl.toolTip = location.displayPath
 
-        let cached = remoteDirectoryCache.cachedDirectory(location)
+        let cached = directoryCache.cachedDirectory(location)
         tableItems = cached?.items ?? []
         tableView.reloadData()
         tableView.deselectAll(nil)
+        let source = [location.kind.displayName, location.authority].compactMap { $0 }.joined(separator: " · ")
         if let cached {
-            let source = isGitHub ? "GitHub" : location.host
             statusLabel.stringValue = "Cached · \(cached.items.count) item\(cached.items.count == 1 ? "" : "s") · refreshing \(source)…"
         } else {
-            statusLabel.stringValue = isGitHub ? "Loading GitHub repositories…" : "Connecting to \(location.host)…"
+            statusLabel.stringValue = "Loading \(source)…"
         }
-        if recordHistory {
-            recordNavigationHistory(location.url)
-        }
+        if recordHistory { recordNavigationHistory(location.url) }
         updateNavigationButtons()
         updateWorkspaceButtons()
-        if revealInSidebar {
-            selectRemoteDirectoryInSidebar(location)
-        }
+        if revealInSidebar { selectDirectoryInSidebar(location) }
 
-        let service = remoteFileSystem
-        let cache = remoteDirectoryCache
+        let service = fileSystem
+        let cache = directoryCache
         let cachedItems = cached?.items
         Task { [weak self] in
             do {
@@ -865,12 +835,9 @@ final class MainWindowController: NSWindowController {
                     self.tableView.reloadData()
                     self.tableView.deselectAll(nil)
                 }
-                let source = isGitHub ? "\(location.host) · GitHub" : location.host
                 self.statusLabel.stringValue = "\(source) · \(items.count) item\(items.count == 1 ? "" : "s")"
-                self.updateRemoteWorkspaceNode(location: location, items: items)
-                if revealInSidebar {
-                    self.selectRemoteDirectoryInSidebar(location)
-                }
+                self.updateWorkspaceNode(location: location, items: items)
+                if revealInSidebar { self.selectDirectoryInSidebar(location) }
                 self.updateNavigationButtons()
             } catch {
                 guard let self, self.remoteNavigationRequestID == requestID else { return }
@@ -892,60 +859,23 @@ final class MainWindowController: NSWindowController {
         if historyIndex + 1 < history.count {
             history.removeSubrange((historyIndex + 1)..<history.count)
         }
-        if history.last != url {
-            history.append(url)
-        }
+        if history.last != url { history.append(url) }
         historyIndex = max(0, history.count - 1)
     }
 
-    private func selectDirectoryInSidebar(_ url: URL) {
-        guard let rootNode else { return }
-        let rootURL = rootNode.info.url.standardizedFileURL
-        let targetURL = url.standardizedFileURL
-        guard fileSystem.isDescendant(targetURL, of: rootURL) else { return }
-
-        suppressOutlineSelection = true
-        defer { suppressOutlineSelection = false }
-
-        if targetURL == rootURL {
-            outlineView.deselectAll(nil)
-            return
-        }
-
-        let relativePath = String(targetURL.path.dropFirst(rootURL.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let components = relativePath.split(separator: "/").map(String.init)
-        var node = rootNode
-
-        for component in components {
-            guard let child = node.child(named: component) else { return }
-            if node !== rootNode {
-                outlineView.expandItem(node)
-            }
-            node = child
-        }
-
-        let row = outlineView.row(forItem: node)
-        if row >= 0 {
-            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            outlineView.scrollRowToVisible(row)
-        }
-    }
-
-    private func isRemoteDescendant(_ candidate: RemoteLocation, of root: RemoteLocation) -> Bool {
-        guard candidate.host == root.host else { return false }
-        if candidate.path == root.path { return true }
-        let prefix = root.path == "/" ? "/" : root.path + "/"
-        return candidate.path.hasPrefix(prefix)
-    }
-
-    private func remoteNode(for location: RemoteLocation) -> RemoteFileNode? {
-        guard let root = remoteRootNode,
+    private func node(for location: FileSystemLocation) -> FileNode? {
+        guard let root = rootNode,
               let rootLocation = root.location,
-              isRemoteDescendant(location, of: rootLocation) else { return nil }
+              location.isDescendant(of: rootLocation) else { return nil }
         if location == rootLocation { return root }
 
-        let relative = String(location.path.dropFirst(rootLocation.path == "/" ? 1 : rootLocation.path.count))
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let relative: String
+        if rootLocation.path == "/" {
+            relative = String(location.path.dropFirst())
+        } else {
+            relative = String(location.path.dropFirst(rootLocation.path.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
         let components = relative.split(separator: "/").map(String.init)
         var node = root
         for component in components {
@@ -955,38 +885,35 @@ final class MainWindowController: NSWindowController {
         return node
     }
 
-    private func updateRemoteWorkspaceNode(location: RemoteLocation, items: [FileInfo]) {
-        guard let node = remoteNode(for: location) else { return }
+    private func updateWorkspaceNode(location: FileSystemLocation, items: [FileInfo]) {
+        guard let node = node(for: location) else { return }
         node.replaceChildren(with: items)
-        if node === remoteRootNode {
+        if node === rootNode {
             outlineView.reloadData()
         } else {
             outlineView.reloadItem(node, reloadChildren: true)
         }
     }
 
-    private func selectRemoteDirectoryInSidebar(_ location: RemoteLocation) {
-        guard let root = remoteRootNode,
+    private func selectDirectoryInSidebar(_ location: FileSystemLocation) {
+        guard let root = rootNode,
               let rootLocation = root.location,
-              isRemoteDescendant(location, of: rootLocation) else { return }
+              location.isDescendant(of: rootLocation) else { return }
 
         suppressOutlineSelection = true
         defer { suppressOutlineSelection = false }
-
         if location == rootLocation {
             outlineView.deselectAll(nil)
             return
         }
-        guard let node = remoteNode(for: location) else { return }
-        var ancestors: [RemoteFileNode] = []
+        guard let node = node(for: location) else { return }
+        var ancestors: [FileNode] = []
         var parent = node.parent
         while let current = parent, current !== root {
             ancestors.append(current)
             parent = current.parent
         }
-        for ancestor in ancestors.reversed() {
-            outlineView.expandItem(ancestor)
-        }
+        for ancestor in ancestors.reversed() { outlineView.expandItem(ancestor) }
         let row = outlineView.row(forItem: node)
         if row >= 0 {
             outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -994,10 +921,10 @@ final class MainWindowController: NSWindowController {
         }
     }
 
-    private func refreshRemoteNode(_ node: RemoteFileNode) {
-        guard let location = node.location else { return }
-        let service = remoteFileSystem
-        let cache = remoteDirectoryCache
+    private func refreshExternalNode(_ node: FileNode) {
+        guard let location = node.location, location.kind != .local else { return }
+        let service = fileSystem
+        let cache = directoryCache
         Task { [weak self, weak node] in
             do {
                 let items = try await Task.detached(priority: .utility) {
@@ -1006,13 +933,13 @@ final class MainWindowController: NSWindowController {
                 try? cache.store(items, for: location)
                 guard let self, let node else { return }
                 node.replaceChildren(with: items)
-                if node === self.remoteRootNode {
+                if node === self.rootNode {
                     self.outlineView.reloadData()
                 } else {
                     self.outlineView.reloadItem(node, reloadChildren: true)
                 }
             } catch {
-                // Cached children remain visible when the remote host is unavailable.
+                // Cached children remain visible while an external provider is unavailable.
             }
         }
     }
@@ -1024,48 +951,27 @@ final class MainWindowController: NSWindowController {
     }
 
     private func browserParentDestination() -> URL? {
-        guard let currentDirectory else { return nil }
-
-        if let currentRemote = RemoteLocation(url: currentDirectory) {
-            if let remoteRoot = remoteRootNode?.location,
-               remoteRoot.host == currentRemote.host,
-               isRemoteDescendant(currentRemote, of: remoteRoot) {
-                guard currentRemote != remoteRoot else { return nil }
-                return currentRemote.parent.url
-            }
-            guard currentRemote.path != "/" else { return nil }
-            return currentRemote.parent.url
-        }
-
-        guard let localRoot = rootNode?.info.url.standardizedFileURL else { return nil }
-        let current = currentDirectory.standardizedFileURL
-        guard current != localRoot, fileSystem.isDescendant(current, of: localRoot) else { return nil }
-        return current.deletingLastPathComponent().standardizedFileURL
+        guard let currentDirectory,
+              let current = FileSystemLocation(url: currentDirectory),
+              let root = rootNode?.location,
+              current.isDescendant(of: root),
+              current != root else { return nil }
+        return current.parent.url
     }
 
     private func updateWorkspaceButtons() {
-        if let remoteRoot = remoteRootNode?.location {
-            workspaceParentButton.isEnabled = remoteRoot.path != "/"
-            workspaceCurrentButton.isEnabled = currentDirectory.flatMap(RemoteLocation.init(url:)).map {
-                $0.host == remoteRoot.host && $0 != remoteRoot
-            } ?? false
-            return
-        }
-
-        guard let root = rootNode?.info.url.standardizedFileURL else {
+        guard let root = rootNode?.location else {
             workspaceParentButton.isEnabled = false
             workspaceCurrentButton.isEnabled = false
             return
         }
-
-        let parent = root.deletingLastPathComponent().standardizedFileURL
-        workspaceParentButton.isEnabled = parent.path != root.path
-        if currentDirectory.flatMap(RemoteLocation.init(url:)) != nil {
-            workspaceCurrentButton.isEnabled = true
+        workspaceParentButton.isEnabled = root.parent != root
+        if let currentDirectory, let current = FileSystemLocation(url: currentDirectory) {
+            workspaceCurrentButton.isEnabled = current.kind == root.kind
+                && current.authority == root.authority
+                && current != root
         } else {
-            workspaceCurrentButton.isEnabled = currentDirectory.map {
-                $0.standardizedFileURL != root
-            } ?? false
+            workspaceCurrentButton.isEnabled = false
         }
     }
 
@@ -1085,16 +991,15 @@ final class MainWindowController: NSWindowController {
         }
         let details = previewDetails(for: item)
 
-        if RemoteLocation(url: item.url) == nil {
+        guard let location = item.location else {
+            clearPreview()
+            return
+        }
+        if location.kind == .local {
             previewRequestID = nil
             removePreviewTemporaryDirectory()
             previewPane.isHidden = false
             previewPane.showPreview(url: item.url, details: details)
-            return
-        }
-
-        guard let remote = RemoteLocation(url: item.url) else {
-            clearPreview()
             return
         }
         if let size = item.size, size > Int64(remotePreviewByteLimit) {
@@ -1113,14 +1018,14 @@ final class MainWindowController: NSWindowController {
         removePreviewTemporaryDirectory()
         previewPane.isHidden = false
         previewPane.showLoading(details: details)
-        let service = remoteFileSystem
+        let service = fileSystem
         let maxBytes = remotePreviewByteLimit
         let filename = item.name
 
         Task { [weak self] in
             do {
                 let data = try await Task.detached(priority: .userInitiated) {
-                    try service.fileContents(of: remote, maxBytes: maxBytes)
+                    try service.fileContents(of: location, maxBytes: maxBytes)
                 }.value
                 guard let self, self.previewRequestID == requestID else { return }
                 let directory = FileManager.default.temporaryDirectory
@@ -1147,7 +1052,7 @@ final class MainWindowController: NSWindowController {
     }
 
     private func previewDetails(for item: FileInfo) -> FilePreviewDetails {
-        let path = RemoteLocation(url: item.url)?.displayPath ?? item.url.path
+        let path = item.location?.displayPath ?? item.url.path
         return FilePreviewDetails(
             name: item.name,
             kind: kindText(for: item),
@@ -1191,7 +1096,7 @@ final class MainWindowController: NSWindowController {
     }
 
     private func icon(for info: FileInfo) -> NSImage {
-        if RemoteLocation(url: info.url) != nil {
+        if info.location?.kind != .local {
             let symbol = info.isNavigableDirectory ? "folder" : "doc"
             let key = "__remote_\(symbol)__" as NSString
             if let cached = iconCache.object(forKey: key) {
@@ -1252,11 +1157,12 @@ final class MainWindowController: NSWindowController {
 
     func executeCommand(arguments: [String]) -> NavigatorCommandResult {
         if let currentDirectory,
-           let remote = RemoteLocation(url: currentDirectory),
+           let location = FileSystemLocation(url: currentDirectory),
+           location.kind != .local,
            let command = arguments.first?.lowercased(),
            !["help", "back", "forward", "ui"].contains(command) {
             let result = NavigatorCommandResult.failure(
-                "Remote command execution is not available yet for \(remote.host). Directory browsing is read-only."
+                "Command execution is not available yet for \(location.kind.displayName) filesystems. Browsing is read-only."
             )
             showCommandResult(result)
             return result
@@ -1311,13 +1217,13 @@ final class MainWindowController: NSWindowController {
             setSidebarWidth(CGFloat(width), persist: true)
             return .ok("sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))")
         case .uiState:
-            let workspace = remoteRootNode?.location?.displayPath ?? rootNode?.info.url.path ?? ""
+            let workspace = rootNode?.location?.displayPath ?? ""
             let directory = currentDirectory.map {
-                RemoteLocation(url: $0)?.displayPath ?? $0.path
+                FileSystemLocation(url: $0)?.displayPath ?? $0.path
             } ?? ""
             let selected = tableView.selectedRowIndexes.compactMap { index -> String? in
                 guard tableItems.indices.contains(index) else { return nil }
-                return RemoteLocation(url: tableItems[index].url)?.displayPath ?? tableItems[index].url.path
+                return tableItems[index].location?.displayPath ?? tableItems[index].url.path
             }
             let output = [
                 "workspace=\(workspace)",
@@ -1416,15 +1322,8 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc func useParentAsWorkspace() {
-        if let remoteRoot = remoteRootNode?.location {
-            guard remoteRoot.path != "/" else { return }
-            setWorkspace(remoteRoot.parent.url)
-            return
-        }
-        guard let root = rootNode?.info.url.standardizedFileURL else { return }
-        let parent = root.deletingLastPathComponent().standardizedFileURL
-        guard parent.path != root.path else { return }
-        setWorkspace(parent)
+        guard let root = rootNode?.location, root.parent != root else { return }
+        setWorkspace(root.parent.url)
     }
 
     @objc func useCurrentDirectoryAsWorkspace() {
@@ -1440,9 +1339,10 @@ final class MainWindowController: NSWindowController {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = currentDirectory.flatMap {
-            RemoteLocation(url: $0) == nil ? $0 : nil
-        } ?? rootNode?.info.url ?? FileManager.default.homeDirectoryForCurrentUser
+        panel.directoryURL = currentDirectory.flatMap { url in
+            FileSystemLocation(url: url)?.kind == .local ? url : nil
+        } ?? (rootNode?.location?.kind == .local ? rootNode?.info.url : nil)
+            ?? FileManager.default.homeDirectoryForCurrentUser
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             self?.setWorkspace(url)
@@ -1450,17 +1350,15 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc func refresh() {
-        if let currentDirectory, RemoteLocation(url: currentDirectory) != nil {
-            navigate(to: currentDirectory, recordHistory: false, revealInSidebar: false)
-            return
-        }
-
+        guard let root = rootNode?.location else { return }
         rootNode?.invalidateChildren(recursively: true)
         outlineView.reloadData()
-        if let currentDirectory, FileManager.default.fileExists(atPath: currentDirectory.path) {
+        if let currentDirectory, let current = FileSystemLocation(url: currentDirectory), current.kind != .local {
+            navigate(to: current.url, recordHistory: false, revealInSidebar: false)
+        } else if let currentDirectory, FileManager.default.fileExists(atPath: currentDirectory.path) {
             navigate(to: currentDirectory, recordHistory: false)
-        } else if let root = rootNode?.info.url {
-            navigate(to: root, recordHistory: false)
+        } else {
+            navigate(to: root.url, recordHistory: false)
         }
     }
 
@@ -1482,10 +1380,10 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc func revealSelectedInFinder() {
-        guard currentDirectory.flatMap(RemoteLocation.init(url:)) == nil else { return }
+        guard let currentDirectory, FileSystemLocation(url: currentDirectory)?.kind == .local else { return }
         if tableView.selectedRow >= 0, tableItems.indices.contains(tableView.selectedRow) {
             NSWorkspace.shared.activateFileViewerSelecting([tableItems[tableView.selectedRow].url])
-        } else if let currentDirectory {
+        } else {
             NSWorkspace.shared.activateFileViewerSelecting([currentDirectory])
         }
     }
@@ -1504,8 +1402,8 @@ final class MainWindowController: NSWindowController {
         let item = tableItems[row]
         if item.isNavigableDirectory {
             navigate(to: item.url, recordHistory: true)
-        } else if let remote = RemoteLocation(url: item.url) {
-            statusLabel.stringValue = "\(remote.displayPath) · remote file opening is not available yet"
+        } else if let location = item.location, location.kind != .local {
+            statusLabel.stringValue = "\(location.displayPath) · external file opening is not available yet"
         } else {
             NSWorkspace.shared.open(item.url)
         }
@@ -1515,8 +1413,8 @@ final class MainWindowController: NSWindowController {
         guard let item = itemForContextMenu() else { return }
         if item.isNavigableDirectory {
             navigate(to: item.url, recordHistory: true)
-        } else if let remote = RemoteLocation(url: item.url) {
-            statusLabel.stringValue = "\(remote.displayPath) · remote file opening is not available yet"
+        } else if let location = item.location, location.kind != .local {
+            statusLabel.stringValue = "\(location.displayPath) · external file opening is not available yet"
         } else {
             NSWorkspace.shared.open(item.url)
         }
@@ -1528,21 +1426,21 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc private func revealContextItem() {
-        guard let item = itemForContextMenu(), RemoteLocation(url: item.url) == nil else { return }
+        guard let item = itemForContextMenu(), item.location?.kind == .local else { return }
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
     }
 
     @objc private func copyContextPath() {
         guard let item = itemForContextMenu() else { return }
         NSPasteboard.general.clearContents()
-        let path = RemoteLocation(url: item.url)?.displayPath ?? item.url.path
+        let path = item.location?.displayPath ?? item.url.path
         NSPasteboard.general.setString(path, forType: .string)
     }
 
     @objc private func openRemoteHost(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue,
               let host = remoteHosts.first(where: { $0.id == id }) else { return }
-        navigate(to: host.navigationLocation.url, recordHistory: true, revealInSidebar: false)
+        setWorkspace(host.navigationLocation.url)
     }
 
     @objc private func addRemoteHost() {
@@ -1553,11 +1451,11 @@ final class MainWindowController: NSWindowController {
 
         let alert = NSAlert()
         alert.messageText = "Add Remote Connection"
-        alert.informativeText = "Choose a configured connection, add a GitHub repository directly, or create a new SSH entry."
+        alert.informativeText = "Choose a configured connection, add a GitHub repository directly, or create a new SFTP connection."
         let addButton = alert.addButton(withTitle: "Add Selected")
         addButton.isEnabled = !availableHosts.isEmpty
         alert.addButton(withTitle: "GitHub Repository…")
-        alert.addButton(withTitle: "New SSH…")
+        alert.addButton(withTitle: "New SFTP…")
         alert.addButton(withTitle: "Cancel")
         alert.accessoryView = picker
         alert.beginSheetModal(for: window) { [weak self] response in
@@ -1570,14 +1468,14 @@ final class MainWindowController: NSWindowController {
                 self.loadGitHubRepositoriesAndPresentPicker()
             } else if response == .alertThirdButtonReturn {
                 DispatchQueue.main.async { [weak self] in
-                    self?.presentNewSSHConnectionSheet()
+                    self?.presentNewSFTPConnectionSheet()
                 }
             }
         }
     }
 
     private func loadGitHubRepositoriesAndPresentPicker() {
-        let service = remoteFileSystem
+        let service = fileSystem
         Task { [weak self] in
             do {
                 let repositories = try await Task.detached(priority: .userInitiated) {
@@ -1620,11 +1518,11 @@ final class MainWindowController: NSWindowController {
         }
     }
 
-    private func presentNewSSHConnectionSheet() {
+    private func presentNewSFTPConnectionSheet() {
         guard let window else { return }
-        let form = NewSSHConnectionView()
+        let form = NewSFTPConnectionView()
         let alert = NSAlert()
-        alert.messageText = "New SSH Connection"
+        alert.messageText = "New SFTP Connection"
         alert.informativeText = "Navigator will add this connection to ~/.ssh/config and reuse OpenSSH for authentication."
         alert.addButton(withTitle: "Add")
         alert.addButton(withTitle: "Cancel")
@@ -1639,7 +1537,7 @@ final class MainWindowController: NSWindowController {
                 _ = try self.sshConfigDiscovery.appendHost(definition)
                 let configured = self.sshConfigDiscovery.hosts()
                 guard let host = configured.first(where: { $0.alias == definition.alias }) else {
-                    self.presentRemoteConnectionError("The SSH entry was written, but Navigator could not reload it.")
+                    self.presentRemoteConnectionError("The SSH config entry was written, but Navigator could not reload the SFTP connection.")
                     return
                 }
                 self.addManagedRemoteHost(host)
@@ -1718,11 +1616,11 @@ extension MainWindowController: NSMenuItemValidation {
         }
         if menuItem.action == #selector(revealContextItem) {
             guard let item = itemForContextMenu() else { return false }
-            return RemoteLocation(url: item.url) == nil
+            return item.location?.kind == .local
         }
         if menuItem.action == #selector(openContextItem),
            let item = itemForContextMenu(),
-           RemoteLocation(url: item.url) != nil {
+           item.location?.kind != .local {
             return item.isNavigableDirectory
         }
         return true
@@ -1731,83 +1629,50 @@ extension MainWindowController: NSMenuItemValidation {
 
 extension MainWindowController: NSOutlineViewDataSource, NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        if let node = item as? FileNode {
-            return node.children().count
-        }
-        if let node = item as? RemoteFileNode {
-            return node.children().count
-        }
-        return rootNode?.children().count ?? remoteRootNode?.children().count ?? 0
+        if let node = item as? FileNode { return node.children().count }
+        return rootNode?.children().count ?? 0
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
-        if let node = item as? FileNode {
-            return node.children()[index]
-        }
-        if let node = item as? RemoteFileNode {
-            return node.children()[index]
-        }
-        if let rootNode {
-            return rootNode.children()[index]
-        }
-        return remoteRootNode!.children()[index]
+        if let node = item as? FileNode { return node.children()[index] }
+        return rootNode!.children()[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        (item as? FileNode)?.isExpandable
-            ?? (item as? RemoteFileNode)?.isExpandable
-            ?? false
+        (item as? FileNode)?.isExpandable ?? false
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
-        let info = (item as? FileNode)?.info ?? (item as? RemoteFileNode)?.info
-        guard let info else { return nil }
+        guard let info = (item as? FileNode)?.info else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("ExplorerCell")
         let cell: NSTableCellView
-
         if let reusable = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView {
             cell = reusable
         } else {
             cell = makeIconTextCell(identifier: identifier)
         }
-
         cell.textField?.stringValue = info.name
-        cell.textField?.toolTip = RemoteLocation(url: info.url)?.displayPath ?? info.url.path
+        cell.textField?.toolTip = info.location?.displayPath ?? info.url.path
         cell.imageView?.image = icon(for: info)
         return cell
     }
 
     func outlineViewItemWillExpand(_ notification: Notification) {
-        guard let node = notification.userInfo?.values.compactMap({ $0 as? RemoteFileNode }).first else { return }
+        guard let node = notification.userInfo?.values.compactMap({ $0 as? FileNode }).first else { return }
         _ = node.children()
-        refreshRemoteNode(node)
+        refreshExternalNode(node)
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !suppressOutlineSelection else { return }
         let row = outlineView.selectedRow
-        guard row >= 0 else { return }
-
-        if let node = outlineView.item(atRow: row) as? RemoteFileNode {
-            if node.info.isNavigableDirectory {
-                navigate(to: node.info.url, recordHistory: true, revealInSidebar: false)
-            } else if let parent = node.parent {
-                navigate(to: parent.info.url, recordHistory: true, revealInSidebar: false)
-                if let index = tableItems.firstIndex(where: { $0.url == node.info.url }) {
-                    tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-                    tableView.scrollRowToVisible(index)
-                }
-            }
-            return
-        }
-
-        guard let node = outlineView.item(atRow: row) as? FileNode else { return }
+        guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
 
         if node.info.isNavigableDirectory {
             navigate(to: node.info.url, recordHistory: true, revealInSidebar: false)
         } else if let parent = node.parent {
             navigate(to: parent.info.url, recordHistory: true, revealInSidebar: false)
-            if let index = tableItems.firstIndex(where: { $0.url.standardizedFileURL == node.info.url.standardizedFileURL }) {
+            if let index = tableItems.firstIndex(where: { $0.location == node.info.location }) {
                 tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
                 tableView.scrollRowToVisible(index)
             }

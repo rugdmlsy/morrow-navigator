@@ -17,7 +17,7 @@ final class RemoteConnectionPickerView: NSView {
 
         let detail = NSTextField(labelWithString: hosts.isEmpty
             ? "All configured connections are already added."
-            : "Choose a configured connection. Its existing SSH settings and keys will be reused.")
+            : "Choose a configured SFTP connection. Existing SSH settings and keys will be reused for authentication.")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
         detail.maximumNumberOfLines = 2
@@ -29,7 +29,7 @@ final class RemoteConnectionPickerView: NSView {
             popup.isEnabled = false
         } else {
             for host in hosts {
-                let kind = host.kind == .github ? "GitHub" : "SSH"
+                let kind = host.kind == .github ? "GitHub" : "SFTP"
                 popup.addItem(withTitle: "\(kind)  ·  \(host.alias)  ·  \(host.endpointDescription)")
             }
         }
@@ -142,7 +142,7 @@ final class GitHubRepositoryPickerView: NSView {
 }
 
 @MainActor
-final class NewSSHConnectionView: NSView {
+final class NewSFTPConnectionView: NSView {
     private let aliasField = NSTextField()
     private let hostnameField = NSTextField()
     private let userField = NSTextField()
