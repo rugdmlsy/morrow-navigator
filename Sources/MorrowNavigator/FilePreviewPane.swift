@@ -47,6 +47,34 @@ private final class HoverIconButton: NSButton {
     }
 }
 
+private final class CenteredButtonContainer: NSView {
+    let button: NSButton
+
+    init(button: NSButton) {
+        self.button = button
+        super.init(frame: .zero)
+        addSubview(button)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 22, height: 22)
+    }
+
+    override func layout() {
+        super.layout()
+        button.frame = NSRect(
+            x: (bounds.width - 22) / 2,
+            y: (bounds.height - 22) / 2,
+            width: 22,
+            height: 22
+        )
+    }
+}
+
 @MainActor
 final class FilePreviewPane: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
@@ -107,7 +135,7 @@ final class FilePreviewPane: NSView {
         pathValue.lineBreakMode = .byTruncatingMiddle
         pathValue.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        copyPathButton.translatesAutoresizingMaskIntoConstraints = false
+        copyPathButton.translatesAutoresizingMaskIntoConstraints = true
         copyPathButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Path")
         copyPathButton.bezelStyle = .inline
         copyPathButton.isBordered = false
@@ -116,18 +144,8 @@ final class FilePreviewPane: NSView {
         copyPathButton.toolTip = "Copy Path"
         copyPathButton.isHidden = true
         copyPathButton.setContentHuggingPriority(.required, for: .horizontal)
-        NSLayoutConstraint.activate([
-            copyPathButton.widthAnchor.constraint(equalToConstant: 22),
-            copyPathButton.heightAnchor.constraint(equalToConstant: 22)
-        ])
 
-        let copyButtonContainer = NSView()
-        copyButtonContainer.translatesAutoresizingMaskIntoConstraints = false
-        copyButtonContainer.addSubview(copyPathButton)
-        NSLayoutConstraint.activate([
-            copyPathButton.centerXAnchor.constraint(equalTo: copyButtonContainer.centerXAnchor),
-            copyPathButton.centerYAnchor.constraint(equalTo: copyButtonContainer.centerYAnchor)
-        ])
+        let copyButtonContainer = CenteredButtonContainer(button: copyPathButton)
 
         let detailsTitle = NSTextField(labelWithString: "DETAILS")
         detailsTitle.font = .systemFont(ofSize: 10.5, weight: .semibold)
