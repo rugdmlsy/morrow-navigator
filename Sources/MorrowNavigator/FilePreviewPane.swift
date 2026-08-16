@@ -146,6 +146,7 @@ final class FilePreviewPane: NSView {
         copyPathButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let copyButtonContainer = CenteredButtonContainer(button: copyPathButton)
+        copyButtonContainer.translatesAutoresizingMaskIntoConstraints = false
 
         let detailsTitle = NSTextField(labelWithString: "DETAILS")
         detailsTitle.font = .systemFont(ofSize: 10.5, weight: .semibold)
@@ -155,7 +156,7 @@ final class FilePreviewPane: NSView {
             [detailLabel("Kind"), kindValue, NSView()],
             [detailLabel("Size"), sizeValue, NSView()],
             [detailLabel("Modified"), modifiedValue, NSView()],
-            [detailLabel("Path"), pathValue, copyButtonContainer]
+            [detailLabel("Path"), pathValue, NSView()]
         ])
         detailsGrid.translatesAutoresizingMaskIntoConstraints = false
         detailsGrid.rowSpacing = 7
@@ -165,10 +166,14 @@ final class FilePreviewPane: NSView {
         detailsGrid.column(at: 2).xPlacement = .trailing
         detailsGrid.column(at: 0).width = 53
         detailsGrid.column(at: 2).width = 22
-        detailsGrid.row(at: 3).yPlacement = .fill
-        detailsGrid.cell(atColumnIndex: 0, rowIndex: 3).yPlacement = .top
-        detailsGrid.cell(atColumnIndex: 1, rowIndex: 3).yPlacement = .top
-        detailsGrid.cell(atColumnIndex: 2, rowIndex: 3).yPlacement = .fill
+        detailsGrid.row(at: 3).yPlacement = .top
+        detailsGrid.addSubview(copyButtonContainer)
+        NSLayoutConstraint.activate([
+            copyButtonContainer.widthAnchor.constraint(equalToConstant: 22),
+            copyButtonContainer.heightAnchor.constraint(equalToConstant: 22),
+            copyButtonContainer.trailingAnchor.constraint(equalTo: detailsGrid.trailingAnchor),
+            copyButtonContainer.centerYAnchor.constraint(equalTo: pathValue.centerYAnchor)
+        ])
 
         let detailsStack = NSStackView(views: [detailsTitle, detailsGrid])
         detailsStack.translatesAutoresizingMaskIntoConstraints = false
