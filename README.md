@@ -6,7 +6,8 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 
 ## MVP
 
-- VS Code-style workspace explorer using `NSOutlineView`
+- Three-column browser layout: pinned/remote sources, active workspace explorer, and file browser
+- VS Code-style active workspace explorer using `NSOutlineView`
 - Lazy directory expansion with instant row-based toggle behavior
 - Native file list with name, kind, size, and modified time
 - Back/forward navigation
@@ -23,7 +24,7 @@ The app uses AppKit directly and keeps the file tree lazy so opening a large wor
 
 Hidden files remain omitted from the GUI by default; `ls -a` can inspect them from the command interface.
 
-Remote connections appear in the sidebar under **REMOTE** with explicit **SFTP**, **GITHUB**, or **GH REPO** badges. **+** opens a connection picker populated from `~/.ssh/config`; those OpenSSH entries supply host, user, port, and key settings, while filesystem operations themselves use the SFTP subsystem. It also provides **GitHub Repository…**, which loads repositories accessible to the account authenticated by `gh`, plus **New SFTP…** for creating a normal OpenSSH `Host` block from structured connection fields. Navigator never stores passwords or private-key contents. The minus button removes only the Navigator shortcut, not the underlying SSH config entry or GitHub repository.
+The leftmost sources column keeps **PINNED** workspaces and **REMOTE** connections separate from the active workspace tree. Local workspace roots can be pinned or unpinned with the pin button beside the workspace title; pinned shortcuts persist across launches and switch the active workspace when clicked. Remote connections use explicit **SFTP**, **GITHUB**, or **GH REPO** badges. **+** opens a connection picker populated from `~/.ssh/config`; those OpenSSH entries supply host, user, port, and key settings, while filesystem operations themselves use the SFTP subsystem. It also provides **GitHub Repository…**, which loads repositories accessible to the account authenticated by `gh`, plus **New SFTP…** for creating a normal OpenSSH `Host` block from structured connection fields. Navigator never stores passwords or private-key contents. The minus button removes only the Navigator shortcut, not the underlying SSH config entry or GitHub repository.
 
 Local, SFTP, and GitHub locations share one `FileSystemLocation` model and one `FileSystemProvider` interface for metadata, child enumeration, and file reads. `UnifiedFileSystemService` routes each operation to `LocalFileSystemProvider`, `SFTPFileSystemProvider`, or `GitHubFileSystemProvider`; the GUI therefore uses one `FileNode` tree and one navigation path instead of separate local/remote implementations. Existing saved `ssh://` Navigator URLs are accepted as legacy input and normalized to `sftp://`.
 
@@ -69,7 +70,7 @@ ui state
 
 Run `help` for the complete command list.
 
-The workspace is a movable browsing root, not a fixed VS Code-style boundary. In the GUI, the sidebar's up-arrow promotes the workspace to its parent, the scope button uses the current directory as the new workspace, and a child folder's context menu provides **Use as Workspace**. The same operations are available as `ws ..`, `ws .`, and `ws <child>`.
+The workspace is a movable browsing root, not a fixed VS Code-style boundary. The middle column contains only the active workspace tree; the left sources column holds pinned workspaces and remotes. In the workspace header, the pin button pins a local root, the up-arrow promotes the workspace to its parent, the scope button uses the current directory as the new workspace, and a child folder's context menu provides **Use as Workspace**. The same workspace-root operations are available as `ws ..`, `ws .`, and `ws <child>`.
 
 When Morrow Navigator is running, the CLI sends commands to the app over local per-user IPC. Filesystem operations therefore update the same state observed by the GUI immediately. When the app is not running, stateless filesystem commands such as `ls`, `mkdir`, `touch`, `mv`, `cp`, `rm`, `open`, and `reveal` can still run directly; commands that manipulate Navigator navigation state require the app.
 

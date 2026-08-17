@@ -136,6 +136,7 @@ final class MainWindowController: NSWindowController {
     private var history: [URL] = []
     private var historyIndex = -1
     private var remoteHosts: [RemoteHost] = []
+    private var pinnedWorkspaceURLs: [URL] = []
     private var remoteNavigationRequestID: UUID?
     private var suppressOutlineSelection = false
     private var isRestoringSidebarWidth = false
@@ -150,6 +151,7 @@ final class MainWindowController: NSWindowController {
     private let commandOutputHitArea = NSView()
     private let commandField = CommandTextField()
     private let commandPlaceholderLabel = NonInteractiveLabel(labelWithString: "Command · help for available commands")
+    private let pinnedWorkspacesStack = NSStackView()
     private let remoteHostsStack = NSStackView()
     private var lastCommandOutput = ""
     private var commandOutputPopover: NSPopover?
@@ -159,6 +161,7 @@ final class MainWindowController: NSWindowController {
     private let browserRevealButton = NSButton()
     private let workspaceParentButton = NSButton()
     private let workspaceCurrentButton = NSButton()
+    private let workspacePinButton = NSButton()
     private let previewPane = FilePreviewPane()
     private var previewRequestID: UUID?
     private var previewTemporaryDirectory: URL?
@@ -173,18 +176,19 @@ final class MainWindowController: NSWindowController {
 
     convenience init(initialWorkspace: URL?) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1120, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: 1320, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Morrow Navigator"
-        window.minSize = NSSize(width: 760, height: 480)
+        window.minSize = NSSize(width: 950, height: 480)
         window.center()
         window.tabbingMode = .preferred
         self.init(window: window)
 
         remoteHosts = loadManagedRemoteHosts()
+        pinnedWorkspaceURLs = loadPinnedWorkspaces()
         configureUI()
         iconCache.countLimit = 256
 
@@ -208,10 +212,12 @@ final class MainWindowController: NSWindowController {
         splitView.dividerStyle = .thin
         splitView.delegate = self
 
-        let sidebar = makeSidebar()
+        let sourcesSidebar = makeSourcesSidebar()
+        let workspaceSidebar = makeSidebar()
         let browser = makeBrowser()
 
-        splitView.addArrangedSubview(sidebar)
+        splitView.addArrangedSubview(sourcesSidebar)
+        splitView.addArrangedSubview(workspaceSidebar)
         splitView.addArrangedSubview(browser)
         contentView.addSubview(splitView)
 
@@ -224,25 +230,104 @@ final class MainWindowController: NSWindowController {
 
         isRestoringSidebarWidth = true
         contentView.layoutSubtreeIfNeeded()
-        let savedWidth = UserDefaults.standard.object(forKey: "sidebarWidth") as? NSNumber
-        setSidebarWidth(CGFloat(savedWidth?.doubleValue ?? 260), persist: false)
+        let savedSourcesWidth = UserDefaults.standard.object(forKey: "sourcesSidebarWidth") as? NSNumber
+        let savedWorkspaceWidth = UserDefaults.standard.object(forKey: "sidebarWidth") as? NSNumber
+        setSourcesSidebarWidth(CGFloat(savedSourcesWidth?.doubleValue ?? 210), persist: false)
+        setSidebarWidth(CGFloat(savedWorkspaceWidth?.doubleValue ?? 260), persist: false)
         isRestoringSidebarWidth = false
     }
 
-    private func setSidebarWidth(_ requestedWidth: CGFloat, persist: Bool) {
-        guard splitView.subviews.count >= 2 else { return }
-        let minimumSidebarWidth: CGFloat = 190
+    private func setSourcesSidebarWidth(_ requestedWidth: CGFloat, persist: Bool) {
+        guard splitView.subviews.count >= 3 else { return }
+        let minimumSourcesWidth: CGFloat = 150
+        let minimumWorkspaceWidth: CGFloat = 190
         let minimumBrowserWidth: CGFloat = 360
-        let maximumSidebarWidth = max(
-            minimumSidebarWidth,
-            splitView.bounds.width - splitView.dividerThickness - minimumBrowserWidth
+        let maximumSourcesWidth = max(
+            minimumSourcesWidth,
+            splitView.bounds.width - (splitView.dividerThickness * 2) - minimumWorkspaceWidth - minimumBrowserWidth
         )
-        let width = min(max(requestedWidth, minimumSidebarWidth), maximumSidebarWidth)
+        let width = min(max(requestedWidth, minimumSourcesWidth), min(320, maximumSourcesWidth))
         splitView.setPosition(width, ofDividerAt: 0)
+        splitView.layoutSubtreeIfNeeded()
+        if persist {
+            UserDefaults.standard.set(Double(width), forKey: "sourcesSidebarWidth")
+        }
+    }
+
+    private func setSidebarWidth(_ requestedWidth: CGFloat, persist: Bool) {
+        guard splitView.subviews.count >= 3 else { return }
+        let minimumWorkspaceWidth: CGFloat = 190
+        let minimumBrowserWidth: CGFloat = 360
+        let sourcesWidth = splitView.subviews[0].frame.width
+        let maximumWorkspaceWidth = max(
+            minimumWorkspaceWidth,
+            splitView.bounds.width - sourcesWidth - (splitView.dividerThickness * 2) - minimumBrowserWidth
+        )
+        let width = min(max(requestedWidth, minimumWorkspaceWidth), maximumWorkspaceWidth)
+        let dividerPosition = sourcesWidth + splitView.dividerThickness + width
+        splitView.setPosition(dividerPosition, ofDividerAt: 1)
         splitView.layoutSubtreeIfNeeded()
         if persist {
             UserDefaults.standard.set(Double(width), forKey: "sidebarWidth")
         }
+    }
+
+    private func makeSourcesSidebar() -> NSView {
+        let container = SidebarBackgroundView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let pinnedLabel = NSTextField(labelWithString: "PINNED")
+        pinnedLabel.translatesAutoresizingMaskIntoConstraints = false
+        pinnedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        pinnedLabel.textColor = .secondaryLabelColor
+
+        pinnedWorkspacesStack.translatesAutoresizingMaskIntoConstraints = false
+        pinnedWorkspacesStack.orientation = .vertical
+        pinnedWorkspacesStack.alignment = .leading
+        pinnedWorkspacesStack.spacing = 1
+        rebuildPinnedWorkspaceButtons()
+
+        let remoteLabel = NSTextField(labelWithString: "REMOTE")
+        remoteLabel.translatesAutoresizingMaskIntoConstraints = false
+        remoteLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        remoteLabel.textColor = .secondaryLabelColor
+
+        let addRemoteButton = symbolButton("plus", action: #selector(addRemoteHost))
+        addRemoteButton.toolTip = "Add Remote Connection…"
+
+        remoteHostsStack.translatesAutoresizingMaskIntoConstraints = false
+        remoteHostsStack.orientation = .vertical
+        remoteHostsStack.alignment = .leading
+        remoteHostsStack.spacing = 1
+        rebuildRemoteHostButtons()
+
+        container.addSubview(pinnedLabel)
+        container.addSubview(pinnedWorkspacesStack)
+        container.addSubview(remoteLabel)
+        container.addSubview(addRemoteButton)
+        container.addSubview(remoteHostsStack)
+
+        NSLayoutConstraint.activate([
+            pinnedLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            pinnedLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+
+            pinnedWorkspacesStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            pinnedWorkspacesStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            pinnedWorkspacesStack.topAnchor.constraint(equalTo: pinnedLabel.bottomAnchor, constant: 5),
+
+            remoteLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            remoteLabel.topAnchor.constraint(equalTo: pinnedWorkspacesStack.bottomAnchor, constant: 18),
+
+            addRemoteButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            addRemoteButton.centerYAnchor.constraint(equalTo: remoteLabel.centerYAnchor),
+
+            remoteHostsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            remoteHostsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            remoteHostsStack.topAnchor.constraint(equalTo: remoteLabel.bottomAnchor, constant: 5),
+            remoteHostsStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -8)
+        ])
+
+        return container
     }
 
     private func makeSidebar() -> NSView {
@@ -259,6 +344,8 @@ final class MainWindowController: NSWindowController {
         workspaceLabel.lineBreakMode = .byTruncatingMiddle
         workspaceLabel.maximumNumberOfLines = 1
 
+        configureSymbolButton(workspacePinButton, symbol: "pin", action: #selector(toggleCurrentWorkspacePin))
+        workspacePinButton.toolTip = "Pin Workspace"
         configureSymbolButton(workspaceParentButton, symbol: "arrow.up", action: #selector(useParentAsWorkspace))
         workspaceParentButton.toolTip = "Use Parent Folder as Workspace"
         configureSymbolButton(workspaceCurrentButton, symbol: "scope", action: #selector(useCurrentDirectoryAsWorkspace))
@@ -268,7 +355,7 @@ final class MainWindowController: NSWindowController {
         let refreshButton = symbolButton("arrow.clockwise", action: #selector(refresh))
         refreshButton.toolTip = "Refresh"
 
-        let buttonStack = NSStackView(views: [workspaceParentButton, workspaceCurrentButton, chooseButton, refreshButton])
+        let buttonStack = NSStackView(views: [workspacePinButton, workspaceParentButton, workspaceCurrentButton, chooseButton, refreshButton])
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 2
@@ -295,31 +382,10 @@ final class MainWindowController: NSWindowController {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
-        let remoteLabel = NSTextField(labelWithString: "REMOTE")
-        remoteLabel.translatesAutoresizingMaskIntoConstraints = false
-        remoteLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        remoteLabel.textColor = .secondaryLabelColor
-
-        let addRemoteButton = symbolButton("plus", action: #selector(addRemoteHost))
-        addRemoteButton.toolTip = "Add Remote Connection…"
-        let remoteButtonStack = NSStackView(views: [addRemoteButton])
-        remoteButtonStack.translatesAutoresizingMaskIntoConstraints = false
-        remoteButtonStack.orientation = .horizontal
-        remoteButtonStack.spacing = 2
-
-        remoteHostsStack.translatesAutoresizingMaskIntoConstraints = false
-        remoteHostsStack.orientation = .vertical
-        remoteHostsStack.alignment = .leading
-        remoteHostsStack.spacing = 1
-        rebuildRemoteHostButtons()
-
         container.addSubview(explorerLabel)
         container.addSubview(workspaceLabel)
         container.addSubview(buttonStack)
         container.addSubview(scrollView)
-        container.addSubview(remoteLabel)
-        container.addSubview(remoteButtonStack)
-        container.addSubview(remoteHostsStack)
 
         NSLayoutConstraint.activate([
             explorerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -335,20 +401,64 @@ final class MainWindowController: NSWindowController {
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 6),
-            scrollView.bottomAnchor.constraint(equalTo: remoteLabel.topAnchor, constant: -8),
-
-            remoteLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            remoteLabel.bottomAnchor.constraint(equalTo: remoteHostsStack.topAnchor, constant: -5),
-
-            remoteButtonStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
-            remoteButtonStack.centerYAnchor.constraint(equalTo: remoteLabel.centerYAnchor),
-
-            remoteHostsStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-            remoteHostsStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
-            remoteHostsStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8)
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
 
         return container
+    }
+
+    private var pinnedWorkspacesDefaultsKey: String { "pinnedWorkspaceURLs.v1" }
+
+    private func loadPinnedWorkspaces() -> [URL] {
+        (UserDefaults.standard.stringArray(forKey: pinnedWorkspacesDefaultsKey) ?? [])
+            .compactMap(URL.init(string:))
+            .filter { FileSystemLocation(url: $0)?.kind == .local }
+    }
+
+    private func persistPinnedWorkspaces() {
+        UserDefaults.standard.set(pinnedWorkspaceURLs.map(\.absoluteString), forKey: pinnedWorkspacesDefaultsKey)
+    }
+
+    private func rebuildPinnedWorkspaceButtons() {
+        for view in pinnedWorkspacesStack.arrangedSubviews {
+            pinnedWorkspacesStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        guard !pinnedWorkspaceURLs.isEmpty else {
+            let label = NSTextField(labelWithString: "No pinned workspaces")
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = .tertiaryLabelColor
+            pinnedWorkspacesStack.addArrangedSubview(label)
+            return
+        }
+
+        for url in pinnedWorkspaceURLs {
+            guard let location = FileSystemLocation(url: url) else { continue }
+            let button = NSButton(title: location.name, target: self, action: #selector(openPinnedWorkspace(_:)))
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.identifier = NSUserInterfaceItemIdentifier(url.absoluteString)
+            button.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "Pinned Workspace")
+            button.imagePosition = .imageLeading
+            button.alignment = .left
+            button.bezelStyle = .inline
+            button.isBordered = false
+            button.toolTip = location.displayPath
+
+            let removeButton = NSButton()
+            configureSymbolButton(removeButton, symbol: "minus.circle", action: #selector(removePinnedWorkspace(_:)))
+            removeButton.identifier = NSUserInterfaceItemIdentifier(url.absoluteString)
+            removeButton.toolTip = "Unpin \(location.name)"
+
+            let row = NSStackView(views: [button, removeButton])
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.orientation = .horizontal
+            row.spacing = 2
+            row.distribution = .fill
+            pinnedWorkspacesStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: pinnedWorkspacesStack.widthAnchor).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        }
     }
 
     private func rebuildRemoteHostButtons() {
@@ -441,6 +551,57 @@ final class MainWindowController: NSWindowController {
         }
         persistRemoteHosts()
         rebuildRemoteHostButtons()
+    }
+
+    private func isPinnedWorkspace(_ url: URL) -> Bool {
+        let target = url.standardizedFileURL
+        return pinnedWorkspaceURLs.contains { $0.standardizedFileURL == target }
+    }
+
+    private func updateWorkspacePinButton() {
+        guard let root = rootNode?.location, root.kind == .local else {
+            workspacePinButton.isEnabled = false
+            workspacePinButton.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin Workspace")
+            workspacePinButton.toolTip = "Only local workspaces can be pinned"
+            return
+        }
+        let pinned = isPinnedWorkspace(root.url)
+        workspacePinButton.isEnabled = true
+        workspacePinButton.image = NSImage(
+            systemSymbolName: pinned ? "pin.fill" : "pin",
+            accessibilityDescription: pinned ? "Unpin Workspace" : "Pin Workspace"
+        )
+        workspacePinButton.toolTip = pinned ? "Unpin Workspace" : "Pin Workspace"
+    }
+
+    @objc private func toggleCurrentWorkspacePin() {
+        guard let root = rootNode?.location, root.kind == .local else { return }
+        let url = root.url.standardizedFileURL
+        if isPinnedWorkspace(url) {
+            pinnedWorkspaceURLs.removeAll { $0.standardizedFileURL == url }
+        } else {
+            pinnedWorkspaceURLs.append(url)
+            pinnedWorkspaceURLs.sort {
+                $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+            }
+        }
+        persistPinnedWorkspaces()
+        rebuildPinnedWorkspaceButtons()
+        updateWorkspacePinButton()
+    }
+
+    @objc private func openPinnedWorkspace(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue, let url = URL(string: raw) else { return }
+        setWorkspace(url)
+    }
+
+    @objc private func removePinnedWorkspace(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue, let url = URL(string: raw) else { return }
+        let standardized = url.standardizedFileURL
+        pinnedWorkspaceURLs.removeAll { $0.standardizedFileURL == standardized }
+        persistPinnedWorkspaces()
+        rebuildPinnedWorkspaceButtons()
+        updateWorkspacePinButton()
     }
 
     private func makeBrowser() -> NSView {
@@ -963,6 +1124,7 @@ final class MainWindowController: NSWindowController {
         guard let root = rootNode?.location else {
             workspaceParentButton.isEnabled = false
             workspaceCurrentButton.isEnabled = false
+            workspacePinButton.isEnabled = false
             return
         }
         workspaceParentButton.isEnabled = root.parent != root
@@ -973,6 +1135,7 @@ final class MainWindowController: NSWindowController {
         } else {
             workspaceCurrentButton.isEnabled = false
         }
+        updateWorkspacePinButton()
     }
 
     private func updatePreviewForSelection() {
@@ -1215,7 +1378,8 @@ final class MainWindowController: NSWindowController {
             NSApp.activate(ignoringOtherApps: true)
         case .uiSidebarWidth(let width):
             setSidebarWidth(CGFloat(width), persist: true)
-            return .ok("sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))")
+            let workspaceWidth = splitView.subviews.count > 1 ? splitView.subviews[1].frame.width : 0
+            return .ok("sidebar_width=\(Int(workspaceWidth))")
         case .uiState:
             let workspace = rootNode?.location?.displayPath ?? ""
             let directory = currentDirectory.map {
@@ -1234,7 +1398,8 @@ final class MainWindowController: NSWindowController {
                 "selection=\(selected.joined(separator: ","))",
                 "preview_visible=\(!previewPane.isHidden)",
                 "window_width=\(Int(window?.frame.width ?? 0))",
-                "sidebar_width=\(Int(splitView.subviews.first?.frame.width ?? 0))",
+                "sources_width=\(Int(splitView.subviews.first?.frame.width ?? 0))",
+                "sidebar_width=\(Int(splitView.subviews.count > 1 ? splitView.subviews[1].frame.width : 0))",
                 "browser_width=\(Int(tableView.enclosingScrollView?.frame.width ?? 0))",
                 "command_focused=\(commandField.currentEditor() != nil)",
                 "command_placeholder_visible=\(!commandPlaceholderLabel.isHidden)"
@@ -1584,8 +1749,15 @@ extension MainWindowController: NSSplitViewDelegate {
         constrainMinCoordinate proposedMinimumPosition: CGFloat,
         ofSubviewAt dividerIndex: Int
     ) -> CGFloat {
-        guard dividerIndex == 0 else { return proposedMinimumPosition }
-        return max(proposedMinimumPosition, 190)
+        switch dividerIndex {
+        case 0:
+            return max(proposedMinimumPosition, 150)
+        case 1:
+            let sourcesWidth = splitView.subviews.first?.frame.width ?? 150
+            return max(proposedMinimumPosition, sourcesWidth + splitView.dividerThickness + 190)
+        default:
+            return proposedMinimumPosition
+        }
     }
 
     func splitView(
@@ -1593,18 +1765,37 @@ extension MainWindowController: NSSplitViewDelegate {
         constrainMaxCoordinate proposedMaximumPosition: CGFloat,
         ofSubviewAt dividerIndex: Int
     ) -> CGFloat {
-        guard dividerIndex == 0 else { return proposedMaximumPosition }
-        let maximumSidebarWidth = max(190, splitView.bounds.width - splitView.dividerThickness - 360)
-        return min(proposedMaximumPosition, maximumSidebarWidth)
+        switch dividerIndex {
+        case 0:
+            let maximumSourcesWidth = max(
+                150,
+                splitView.bounds.width - (splitView.dividerThickness * 2) - 190 - 360
+            )
+            return min(proposedMaximumPosition, min(320, maximumSourcesWidth))
+        case 1:
+            let maximumWorkspaceEdge = max(
+                150 + splitView.dividerThickness + 190,
+                splitView.bounds.width - splitView.dividerThickness - 360
+            )
+            return min(proposedMaximumPosition, maximumWorkspaceEdge)
+        default:
+            return proposedMaximumPosition
+        }
     }
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
         guard !isRestoringSidebarWidth,
               let splitView = notification.object as? NSSplitView,
               splitView === self.splitView,
-              let sidebar = splitView.subviews.first,
-              sidebar.frame.width > 0 else { return }
-        UserDefaults.standard.set(Double(sidebar.frame.width), forKey: "sidebarWidth")
+              splitView.subviews.count >= 3 else { return }
+        let sourcesWidth = splitView.subviews[0].frame.width
+        let workspaceWidth = splitView.subviews[1].frame.width
+        if sourcesWidth > 0 {
+            UserDefaults.standard.set(Double(sourcesWidth), forKey: "sourcesSidebarWidth")
+        }
+        if workspaceWidth > 0 {
+            UserDefaults.standard.set(Double(workspaceWidth), forKey: "sidebarWidth")
+        }
     }
 }
 
