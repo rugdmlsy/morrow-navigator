@@ -476,7 +476,7 @@ final class MainWindowController: NSWindowController {
         }
 
         for host in remoteHosts {
-            let button = NSButton(title: host.displayName ?? host.alias, target: self, action: #selector(openRemoteHost(_:)))
+            let button = NSButton(title: host.displayTitle, target: self, action: #selector(openRemoteHost(_:)))
             button.translatesAutoresizingMaskIntoConstraints = false
             button.identifier = NSUserInterfaceItemIdentifier(host.id)
             let symbol = host.kind == .github ? "chevron.left.forwardslash.chevron.right" : "server.rack"
@@ -497,7 +497,7 @@ final class MainWindowController: NSWindowController {
             let removeButton = NSButton()
             configureSymbolButton(removeButton, symbol: "minus.circle", action: #selector(removeRemoteHost(_:)))
             removeButton.identifier = NSUserInterfaceItemIdentifier(host.id)
-            removeButton.toolTip = "Remove \(host.displayName ?? host.alias) from Navigator"
+            removeButton.toolTip = "Remove \(host.displayTitle) from Navigator"
             let row = NSStackView(views: [button, kindBadge, removeButton])
             row.translatesAutoresizingMaskIntoConstraints = false
             row.orientation = .horizontal
@@ -910,7 +910,8 @@ final class MainWindowController: NSWindowController {
 
         let root = FileNode(info: info, fileSystem: fileSystem, cache: directoryCache)
         rootNode = root
-        workspaceLabel.stringValue = info.name.uppercased()
+        let workspaceTitle = remoteHosts.first(where: { $0.navigationLocation == location })?.displayTitle ?? info.name
+        workspaceLabel.stringValue = workspaceTitle.uppercased()
         workspaceLabel.toolTip = location.displayPath
         if location.kind == .local {
             UserDefaults.standard.set(location.path, forKey: "lastWorkspacePath")

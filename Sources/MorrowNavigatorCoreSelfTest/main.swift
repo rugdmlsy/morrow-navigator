@@ -86,6 +86,7 @@ func run() throws {
         displayName: "reslab-asu/agent-rollback-protocol",
         rootPath: "/reslab-asu/agent-rollback-protocol"
     )
+    try expect(repositoryShortcut.displayTitle == "reslab-asu/agent-rollback-protocol", "remote shortcut display title was incorrect")
     try expect(repositoryShortcut.navigationLocation == FileSystemLocation(kind: .github, authority: "github.com", path: "/reslab-asu/agent-rollback-protocol"), "GitHub repository shortcut navigation path was incorrect")
     try expect(repositoryShortcut.endpointDescription == "github.com/reslab-asu/agent-rollback-protocol", "GitHub repository shortcut endpoint description was incorrect")
     let shortcutData = try JSONEncoder().encode([repositoryShortcut])

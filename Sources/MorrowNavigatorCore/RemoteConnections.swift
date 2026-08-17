@@ -62,6 +62,8 @@ public struct RemoteHost: Sendable, Equatable, Hashable, Codable {
 
     public var id: String { "\(kind.rawValue)|\(alias)|\(rootPath)|\(displayName ?? "")" }
 
+    public var displayTitle: String { displayName ?? alias }
+
     public var navigationLocation: FileSystemLocation {
         FileSystemLocation(kind: kind.fileSystemKind, authority: alias, path: rootPath)
     }
