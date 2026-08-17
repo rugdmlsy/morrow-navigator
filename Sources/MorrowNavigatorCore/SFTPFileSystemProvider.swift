@@ -216,7 +216,7 @@ public struct SFTPFileSystemProvider: FileSystemProvider {
             "-q",
             "-b", batchURL.path,
             "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
+            "-o", "ConnectTimeout=15",
             "-o", "ConnectionAttempts=1",
             "-o", "NumberOfPasswordPrompts=0",
             authority
