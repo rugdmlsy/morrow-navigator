@@ -408,15 +408,25 @@ final class MainWindowController: NSWindowController {
     }
 
     private var pinnedWorkspacesDefaultsKey: String { "pinnedWorkspaceURLs.v1" }
+    private var permanentPinnedWorkspaceURL: URL { FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL }
+
+    private func isPermanentPinnedWorkspace(_ url: URL) -> Bool {
+        url.standardizedFileURL == permanentPinnedWorkspaceURL
+    }
 
     private func loadPinnedWorkspaces() -> [URL] {
-        (UserDefaults.standard.stringArray(forKey: pinnedWorkspacesDefaultsKey) ?? [])
+        let saved = (UserDefaults.standard.stringArray(forKey: pinnedWorkspacesDefaultsKey) ?? [])
             .compactMap(URL.init(string:))
             .filter { FileSystemLocation(url: $0)?.kind == .local }
+            .filter { !isPermanentPinnedWorkspace($0) }
+        return [permanentPinnedWorkspaceURL] + saved
     }
 
     private func persistPinnedWorkspaces() {
-        UserDefaults.standard.set(pinnedWorkspaceURLs.map(\.absoluteString), forKey: pinnedWorkspacesDefaultsKey)
+        let userPins = pinnedWorkspaceURLs
+            .filter { !isPermanentPinnedWorkspace($0) }
+            .map(\.absoluteString)
+        UserDefaults.standard.set(userPins, forKey: pinnedWorkspacesDefaultsKey)
     }
 
     private func rebuildPinnedWorkspaceButtons() {
@@ -435,22 +445,31 @@ final class MainWindowController: NSWindowController {
 
         for url in pinnedWorkspaceURLs {
             guard let location = FileSystemLocation(url: url) else { continue }
-            let button = NSButton(title: location.name, target: self, action: #selector(openPinnedWorkspace(_:)))
+            let isPermanent = isPermanentPinnedWorkspace(url)
+            let title = isPermanent ? "~" : location.name
+            let button = NSButton(title: title, target: self, action: #selector(openPinnedWorkspace(_:)))
             button.translatesAutoresizingMaskIntoConstraints = false
             button.identifier = NSUserInterfaceItemIdentifier(url.absoluteString)
-            button.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "Pinned Workspace")
+            button.image = NSImage(
+                systemSymbolName: isPermanent ? "house" : "folder",
+                accessibilityDescription: isPermanent ? "Home" : "Pinned Workspace"
+            )
             button.imagePosition = .imageLeading
             button.alignment = .left
             button.bezelStyle = .inline
             button.isBordered = false
             button.toolTip = location.displayPath
 
-            let removeButton = NSButton()
-            configureSymbolButton(removeButton, symbol: "minus.circle", action: #selector(removePinnedWorkspace(_:)))
-            removeButton.identifier = NSUserInterfaceItemIdentifier(url.absoluteString)
-            removeButton.toolTip = "Unpin \(location.name)"
-
-            let row = NSStackView(views: [button, removeButton])
+            let row: NSStackView
+            if isPermanent {
+                row = NSStackView(views: [button])
+            } else {
+                let removeButton = NSButton()
+                configureSymbolButton(removeButton, symbol: "minus.circle", action: #selector(removePinnedWorkspace(_:)))
+                removeButton.identifier = NSUserInterfaceItemIdentifier(url.absoluteString)
+                removeButton.toolTip = "Unpin \(location.name)"
+                row = NSStackView(views: [button, removeButton])
+            }
             row.translatesAutoresizingMaskIntoConstraints = false
             row.orientation = .horizontal
             row.spacing = 2
@@ -565,6 +584,12 @@ final class MainWindowController: NSWindowController {
             workspacePinButton.toolTip = "Only local workspaces can be pinned"
             return
         }
+        if isPermanentPinnedWorkspace(root.url) {
+            workspacePinButton.isEnabled = false
+            workspacePinButton.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Permanently Pinned Workspace")
+            workspacePinButton.toolTip = "~ is permanently pinned"
+            return
+        }
         let pinned = isPinnedWorkspace(root.url)
         workspacePinButton.isEnabled = true
         workspacePinButton.image = NSImage(
@@ -577,12 +602,15 @@ final class MainWindowController: NSWindowController {
     @objc private func toggleCurrentWorkspacePin() {
         guard let root = rootNode?.location, root.kind == .local else { return }
         let url = root.url.standardizedFileURL
+        guard !isPermanentPinnedWorkspace(url) else { return }
         if isPinnedWorkspace(url) {
             pinnedWorkspaceURLs.removeAll { $0.standardizedFileURL == url }
         } else {
             pinnedWorkspaceURLs.append(url)
             pinnedWorkspaceURLs.sort {
-                $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+                if isPermanentPinnedWorkspace($0) { return true }
+                if isPermanentPinnedWorkspace($1) { return false }
+                return $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
             }
         }
         persistPinnedWorkspaces()
@@ -598,6 +626,7 @@ final class MainWindowController: NSWindowController {
     @objc private func removePinnedWorkspace(_ sender: NSButton) {
         guard let raw = sender.identifier?.rawValue, let url = URL(string: raw) else { return }
         let standardized = url.standardizedFileURL
+        guard !isPermanentPinnedWorkspace(standardized) else { return }
         pinnedWorkspaceURLs.removeAll { $0.standardizedFileURL == standardized }
         persistPinnedWorkspaces()
         rebuildPinnedWorkspaceButtons()
