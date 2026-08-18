@@ -83,12 +83,12 @@ func run() throws {
         hostname: "github.com",
         user: "git",
         kind: .github,
-        displayName: "reslab-asu/agent-rollback-protocol",
-        rootPath: "/reslab-asu/agent-rollback-protocol"
+        displayName: "inflab-asu/agent-rollback-protocol",
+        rootPath: "/inflab-asu/agent-rollback-protocol"
     )
-    try expect(repositoryShortcut.displayTitle == "reslab-asu/agent-rollback-protocol", "remote shortcut display title was incorrect")
-    try expect(repositoryShortcut.navigationLocation == FileSystemLocation(kind: .github, authority: "github.com", path: "/reslab-asu/agent-rollback-protocol"), "GitHub repository shortcut navigation path was incorrect")
-    try expect(repositoryShortcut.endpointDescription == "github.com/reslab-asu/agent-rollback-protocol", "GitHub repository shortcut endpoint description was incorrect")
+    try expect(repositoryShortcut.displayTitle == "inflab-asu/agent-rollback-protocol", "remote shortcut display title was incorrect")
+    try expect(repositoryShortcut.navigationLocation == FileSystemLocation(kind: .github, authority: "github.com", path: "/inflab-asu/agent-rollback-protocol"), "GitHub repository shortcut navigation path was incorrect")
+    try expect(repositoryShortcut.endpointDescription == "github.com/inflab-asu/agent-rollback-protocol", "GitHub repository shortcut endpoint description was incorrect")
     let shortcutData = try JSONEncoder().encode([repositoryShortcut])
     let decodedShortcuts = try JSONDecoder().decode([RemoteHost].self, from: shortcutData)
     try expect(decodedShortcuts == [repositoryShortcut], "GitHub repository shortcut did not persist through Codable")
