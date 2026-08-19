@@ -138,8 +138,11 @@ final class MainWindowController: NSWindowController {
     private var remoteHosts: [RemoteHost] = []
     private var pinnedWorkspaceURLs: [URL] = []
     private var remoteNavigationRequestID: UUID?
+    private var remoteNavigationRequestLocation: FileSystemLocation?
+    private var remoteRefreshTimes: [FileSystemLocation: Date] = [:]
     private var suppressOutlineSelection = false
     private var isRestoringSidebarWidth = false
+    private let remoteAutoRefreshInterval: TimeInterval = 60 * 60
 
     private let splitView = NSSplitView()
     private let outlineView = InstantOutlineView()
@@ -965,6 +968,7 @@ final class MainWindowController: NSWindowController {
         }
 
         remoteNavigationRequestID = nil
+        remoteNavigationRequestLocation = nil
         browserRevealButton.isEnabled = true
         do {
             tableItems = try fileSystem.children(of: location)
@@ -987,9 +991,12 @@ final class MainWindowController: NSWindowController {
         }
     }
 
-    private func navigateExternal(to location: FileSystemLocation, recordHistory: Bool, revealInSidebar: Bool) {
-        let requestID = UUID()
-        remoteNavigationRequestID = requestID
+    private func navigateExternal(
+        to location: FileSystemLocation,
+        recordHistory: Bool,
+        revealInSidebar: Bool,
+        forceRefresh: Bool = false
+    ) {
         directoryWatcher.stop()
         browserRevealButton.isEnabled = false
         currentDirectory = location.url
@@ -1002,14 +1009,39 @@ final class MainWindowController: NSWindowController {
         tableView.deselectAll(nil)
         let source = [location.kind.displayName, location.authority].compactMap { $0 }.joined(separator: " · ")
         if let cached {
-            statusLabel.stringValue = "Cached · \(cached.items.count) item\(cached.items.count == 1 ? "" : "s") · refreshing \(source)…"
+            statusLabel.stringValue = "Cached · \(cached.items.count) item\(cached.items.count == 1 ? "" : "s")"
         } else {
-            statusLabel.stringValue = "Loading \(source)…"
+            statusLabel.stringValue = "No cached data"
         }
         if recordHistory { recordNavigationHistory(location.url) }
         updateNavigationButtons()
         updateWorkspaceButtons()
         if revealInSidebar { selectDirectoryInSidebar(location) }
+
+        let now = Date()
+        let shouldRefresh = forceRefresh || shouldAutomaticallyRefreshExternal(location, now: now)
+        guard shouldRefresh else {
+            if remoteNavigationRequestLocation != location {
+                remoteNavigationRequestID = nil
+                remoteNavigationRequestLocation = nil
+            }
+            if cached == nil {
+                statusLabel.stringValue = remoteNavigationRequestLocation == location
+                    ? "Loading \(source)…"
+                    : "No cached data · use Refresh to retry \(source)"
+            }
+            return
+        }
+
+        let requestID = UUID()
+        remoteNavigationRequestID = requestID
+        remoteNavigationRequestLocation = location
+        remoteRefreshTimes[location] = now
+        if let cached {
+            statusLabel.stringValue = "Cached · \(cached.items.count) item\(cached.items.count == 1 ? "" : "s") · refreshing \(source)…"
+        } else {
+            statusLabel.stringValue = "Loading \(source)…"
+        }
 
         let service = fileSystem
         let cache = directoryCache
@@ -1021,6 +1053,8 @@ final class MainWindowController: NSWindowController {
                 }.value
                 try? cache.store(items, for: location)
                 guard let self, self.remoteNavigationRequestID == requestID else { return }
+                self.remoteNavigationRequestID = nil
+                self.remoteNavigationRequestLocation = nil
                 if cachedItems != items {
                     self.tableItems = items
                     self.tableView.reloadData()
@@ -1032,6 +1066,8 @@ final class MainWindowController: NSWindowController {
                 self.updateNavigationButtons()
             } catch {
                 guard let self, self.remoteNavigationRequestID == requestID else { return }
+                self.remoteNavigationRequestID = nil
+                self.remoteNavigationRequestLocation = nil
                 if let cachedItems {
                     self.tableItems = cachedItems
                     self.tableView.reloadData()
@@ -1044,6 +1080,11 @@ final class MainWindowController: NSWindowController {
                 self.updateNavigationButtons()
             }
         }
+    }
+
+    private func shouldAutomaticallyRefreshExternal(_ location: FileSystemLocation, now: Date = Date()) -> Bool {
+        guard let lastRefresh = remoteRefreshTimes[location] else { return true }
+        return now.timeIntervalSince(lastRefresh) >= remoteAutoRefreshInterval
     }
 
     private func recordNavigationHistory(_ url: URL) {
@@ -1112,8 +1153,11 @@ final class MainWindowController: NSWindowController {
         }
     }
 
-    private func refreshExternalNode(_ node: FileNode) {
+    private func refreshExternalNode(_ node: FileNode, forceRefresh: Bool = false) {
         guard let location = node.location, location.kind != .local else { return }
+        let now = Date()
+        guard forceRefresh || shouldAutomaticallyRefreshExternal(location, now: now) else { return }
+        remoteRefreshTimes[location] = now
         let service = fileSystem
         let cache = directoryCache
         Task { [weak self, weak node] in
@@ -1546,11 +1590,21 @@ final class MainWindowController: NSWindowController {
 
     @objc func refresh() {
         guard let root = rootNode?.location else { return }
+        if let currentDirectory,
+           let current = FileSystemLocation(url: currentDirectory),
+           current.kind != .local {
+            navigateExternal(
+                to: current,
+                recordHistory: false,
+                revealInSidebar: false,
+                forceRefresh: true
+            )
+            return
+        }
+
         rootNode?.invalidateChildren(recursively: true)
         outlineView.reloadData()
-        if let currentDirectory, let current = FileSystemLocation(url: currentDirectory), current.kind != .local {
-            navigate(to: current.url, recordHistory: false, revealInSidebar: false)
-        } else if let currentDirectory, FileManager.default.fileExists(atPath: currentDirectory.path) {
+        if let currentDirectory, FileManager.default.fileExists(atPath: currentDirectory.path) {
             navigate(to: currentDirectory, recordHistory: false)
         } else {
             navigate(to: root.url, recordHistory: false)
