@@ -3,7 +3,7 @@ import MorrowNavigatorCore
 
 @MainActor
 final class FileNode: NSObject {
-    let info: FileInfo
+    private(set) var info: FileInfo
     weak var parent: FileNode?
 
     private let fileSystem: UnifiedFileSystemService
@@ -44,8 +44,19 @@ final class FileNode: NSObject {
     }
 
     func replaceChildren(with items: [FileInfo]) {
-        cachedChildren = items.map {
-            FileNode(info: $0, parent: self, fileSystem: fileSystem, cache: cache)
+        let existingByLocation = Dictionary(
+            uniqueKeysWithValues: (cachedChildren ?? []).compactMap { child in
+                child.location.map { ($0, child) }
+            }
+        )
+        cachedChildren = items.map { item in
+            if let location = item.location,
+               let existing = existingByLocation[location] {
+                existing.info = item
+                existing.parent = self
+                return existing
+            }
+            return FileNode(info: item, parent: self, fileSystem: fileSystem, cache: cache)
         }
     }
 

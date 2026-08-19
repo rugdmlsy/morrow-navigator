@@ -1080,7 +1080,7 @@ final class MainWindowController: NSWindowController {
         guard let node = node(for: location) else { return }
         node.replaceChildren(with: items)
         if node === rootNode {
-            outlineView.reloadData()
+            outlineView.reloadItem(nil, reloadChildren: true)
         } else {
             outlineView.reloadItem(node, reloadChildren: true)
         }
@@ -1125,7 +1125,7 @@ final class MainWindowController: NSWindowController {
                 guard let self, let node else { return }
                 node.replaceChildren(with: items)
                 if node === self.rootNode {
-                    self.outlineView.reloadData()
+                    self.outlineView.reloadItem(nil, reloadChildren: true)
                 } else {
                     self.outlineView.reloadItem(node, reloadChildren: true)
                 }
